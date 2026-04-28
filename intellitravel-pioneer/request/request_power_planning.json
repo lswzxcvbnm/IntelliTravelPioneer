@@ -1,0 +1,9 @@
+{
+  "user_id": "user123",
+  "age": 25,
+  "fitness_level": "MEDIUM",
+  "preferences": ["Nature", "Hiking"],
+  "start_location": "Central Park, NY",
+  "start_time": "2023-10-27T10:00:00Z",
+  "duration_hours": 4
+}

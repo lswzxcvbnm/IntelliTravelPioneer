@@ -1,0 +1,8 @@
+{
+  "departure": "Shanghai",
+  "destination": "Paris, France",
+  "days": 3,
+  "interests": ["Museums", "Food", "History"],
+  "budgetLevel": "Medium",
+  "additionalNotes": "Prefer walking tours."
+}

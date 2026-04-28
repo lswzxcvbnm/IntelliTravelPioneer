@@ -1,0 +1,15 @@
+{
+  "request_body": {
+    "timestamp": "2026-03-04T10:00:00+08:00",
+    "heart_rate": 96,
+    "steps": 1200,
+    "location": {
+      "lat": 31.2304,
+      "lng": 121.4737,
+      "name": "人民广场"
+    },
+    "total_power": 100,
+    "extInfo": "trip init from frontend"
+  },
+  "curl_example": "curl -X POST http://localhost:8080/api/trips -H \"Content-Type: application/json\" -H \"token: <your_token>\" -d '{\"timestamp\":\"2026-03-04T10:00:00+08:00\",\"heart_rate\":96,\"steps\":1200,\"location\":{\"lat\":31.2304,\"lng\":121.4737,\"name\":\"人民广场\"},\"total_power\":100,\"extInfo\":\"trip init from frontend\"}'"
+}

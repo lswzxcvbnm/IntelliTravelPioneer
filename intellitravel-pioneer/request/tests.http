@@ -1,0 +1,329 @@
+### 1. 创建时空胶囊 (Create)
+POST http://localhost:8080/api/capsule/create?userId=1
+Content-Type: application/json
+
+{
+  "title": "故宫的春日记忆",
+  "content": "今天天气真好，红墙黄瓦配上蓝天，绝美！这是一个值得铭记的时刻。",
+  "decoration": "复古相框",
+  "color": "red",
+  "isPublic": true,
+  "date": "2026-03-03",
+  "location": {
+    "name": "故宫博物院",
+    "address": "北京市东城区景山前街4号",
+    "lat": 39.916345,
+    "lng": 116.397155,
+    "city": "北京市",
+    "country": "中国"
+  },
+  "images": [
+    {
+      "url": "https://your-oss-bucket.oss-cn-beijing.aliyuncs.com/test-capsule/gugong_main.jpg",
+      "type": "image",
+      "thumbnail": "https://your-oss-bucket.oss-cn-beijing.aliyuncs.com/test-capsule/gugong_main.jpg?x-oss-process=image/resize,m_fill,w_300,h_300",
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "url": "https://your-oss-bucket.oss-cn-beijing.aliyuncs.com/test-capsule/gugong_corner.mp4",
+      "type": "video"
+    }
+  ]
+}
+
+### 更新时空胶囊 (Update)
+POST http://localhost:8080/api/capsule/1/update?userId=1
+Content-Type: application/json
+
+{
+  "title": "故宫的春日记忆-更新版",
+  "content": "修改一下文案，风景依然很美。",
+  "decoration": "现代相框",
+  "color": "blue",
+  "isPublic": false,
+  "date": "2026-03-04",
+  "location": {
+    "name": "故宫博物院神武门",
+    "address": "北京市东城区景山前街4号",
+    "lat": 39.916345,
+    "lng": 116.397155,
+    "city": "北京市",
+    "country": "中国"
+  },
+  "images": [
+    {
+      "url": "https://your-oss-bucket.oss-cn-beijing.aliyuncs.com/test-capsule/gugong_main.jpg",
+      "type": "image",
+      "thumbnail": "https://your-oss-bucket.oss-cn-beijing.aliyuncs.com/test-capsule/gugong_main.jpg?x-oss-process=image/resize,m_fill,w_300,h_300",
+      "width": 1920,
+      "height": 1080
+    }
+  ]
+}
+
+
+### 2. 查询用户创建的所有胶囊 (Get List by User)
+GET http://localhost:8080/api/capsule/user/1
+
+
+### 3. 根据地名查询胶囊 (Get List by Location)
+GET http://localhost:8080/api/capsule/location?locationName=故宫博物院
+
+
+### 4. 查看单个胶囊侧详细信息 (Get Detail)
+# 前提：请将上一步POST创建后返回的 ID 替换掉此处的 `1`
+GET http://localhost:8080/api/capsule/1/detail?currentUserId=1
+
+
+### 5. 删除胶囊 (Delete)
+# 前提：请将真实存在的 capsuleId 替换此处的 `1`
+DELETE http://localhost:8080/api/capsule/1?userId=1
+
+###创建用户
+POST http://localhost:8080/api/user
+Content-Type: application/json
+
+{
+    "username": "lty",
+    "password": "123456",
+    "name": "lty",
+    "grade": 1,
+    "avatar": "",
+    "telephone": "13800138000",
+    "email": "",
+    "location": "上海市"
+}
+
+### 获取用户信息
+GET http://localhost:8080/api/user/lty
+
+### 用户登录
+POST http://localhost:8080/api/user/login
+Content-Type: application/json
+
+{
+    "username": "lty",
+    "password": "123456"
+}
+
+### 设置用户等级（测试 updateInformation）
+# 说明：PUT /api/user 接口会用请求中的字段覆盖数据库值，因此请尽量携带完整字段。
+PUT http://localhost:8080/api/user
+Content-Type: application/json
+
+{
+  "username": "lty",
+  "name": "lty",
+  "grade": "5",
+  "avatar": "http://bluewhale-lsw.oss-cn-shanghai.aliyuncs.com/f6e1655b5fde2a149f692c492b6f5342ca7350eb0476e56f08cafcc2ea7d08bf.jpg",
+  "telephone": "13800138000",
+  "email": "2217291370@qq.com",
+  "location": "上海市"
+}
+
+### 获取用户信息（验证等级已更新）
+# 预期：grade 为 "5"
+GET http://localhost:8080/api/user/lty
+
+### 给用户增加经验值（测试升级逻辑）
+# 说明：当前升级逻辑基于 UserPO.addExperience，只有当累积经验落入 “100*当前等级 ~ 100*(当前等级+1)-1” 区间时，会升级 1 级并扣除 100*当前等级的经验。
+# 例如：等级 1 时，经验区间 [100,199] 会升级到 2 级，升级后经验会减去 100。
+POST http://localhost:8080/api/user/lty/experience
+Content-Type: application/json
+
+{
+  "experience": 200
+}
+
+### 再次获取用户信息（验证 grade/experience 变更）
+# 预期：grade 从 1 升到 2，experience 应该变为 50
+GET http://localhost:8080/api/user/lty
+
+### 修改/创建用户健康数据
+POST http://localhost:8080/api/user/health/update
+Content-Type: application/json
+
+{
+  "userId": 1,
+  "username": "lty",
+  "sex": "man",             
+  "height": 175.0,         
+  "weight": 70.0,          
+  "age": 21,               
+  "exerciseDaysPerWeek": 3, 
+  "combatPower": 0        
+}
+
+### 修改用户健康数据并触发战力值重新计算
+POST http://localhost:8080/api/user/health/update
+Content-Type: application/json
+
+{
+  "username": "lty",
+  "sex": "man",             
+  "height": 175.0,         
+  "weight": 70.0,          
+  "age": 21,               
+  "exerciseDaysPerWeek": 3 
+}
+
+### 获取用户的健康数据（可以查看计算出的最新战力值 combatPower）
+GET http://localhost:8080/api/user/health/lty
+
+
+### 创建行程
+POST http://localhost:8080/api/trips?itinerary_id=073bb601-189a-431b-b6c8-8364d293e478
+Content-Type: application/json
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzczNTUwNjI2fQ.QysHf_GO58Q_6Dx0KzxQKCJeYWM2Eaxlsh8qa-dcdn0
+
+{
+  "timestamp": "2026-03-05T10:00:00+08:00",
+  "heart_rate": 85,
+  "steps": 0,
+  "location": {
+    "lat": 31.2304,
+    "lng": 121.4737,
+    "name": "人民广场"
+  },
+  "extInfo": "trip init from frontend"
+}
+
+### 查询当前是否存在进行中的行程
+GET http://localhost:8080/api/trips/current
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+### 实时上报位置1 (注意：请将 <trip_id> 替换为创建行程接口返回的真实id)
+POST http://localhost:8080/api/trips/3eaaf7dfc38a447f829bc12cc5c85b8d/status
+Content-Type: application/json
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+{
+  "timestamp": "2026-03-05T10:45:00+08:00",
+  "heart_rate": 115,
+  "steps": 2300,
+  "location": {
+    "lat": 31.2987,
+    "lng": 121.5073,
+    "name": "复旦大学"
+  },
+  "extInfo": "University walking"
+}
+
+### 实时上报位置2 (注意：请将 <trip_id> 替换为创建行程接口返回的真实id)
+POST http://localhost:8080/api/trips/3eaaf7dfc38a447f829bc12cc5c85b8d/status
+Content-Type: application/json
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+{
+  "timestamp": "2026-03-05T11:30:00+08:00",
+  "heart_rate": 120,
+  "steps": 5000,
+  "location": {
+    "lat": 31.020729302720287,
+    "lng": 121.43233597344802,
+    "name": "上海交通大学"
+  },
+  "extInfo": "Walking in the universities"
+}
+
+### 结束行程 (注意：请将 <trip_id> 替换为创建行程接口返回的真实id)
+POST http://localhost:8080/api/trips/3eaaf7dfc38a447f829bc12cc5c85b8d/end
+Content-Type: application/json 
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+{
+  "timestamp": "2026-03-05T14:00:00+08:00",
+  "heart_rate": 80,
+  "steps": 8000,
+  "location": {
+    "lat": 31.2304,
+    "lng": 121.4737,
+    "name": "人民广场"
+  },
+  "extInfo": "Trip ended, back to starting point"
+}
+
+### 生成 trip AI 总结（默认每个 trip 仅一条，可加 ?force=true 强制重生）
+POST http://localhost:8080/api/trips/b691c9d380254b8d81e55847c524a7e1/summary
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+### 查询 trip AI 总结（前端结束后可直接轮询这个接口，直到 summary 生成完成）
+GET http://localhost:8080/api/trips/b691c9d380254b8d81e55847c524a7e1/summary
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+### 查询当前用户历史 trip 总结列表
+GET http://localhost:8080/api/trips/summaries?page=0&size=10&include_content=false
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+
+### 6. 生成行程战报海报 
+# 注意：前端可以将刚刚拿到的轨迹图URL、计算出的步数和耗时在这里传给后端渲染生成海报。
+# 将URL中的id替换成你测试真实的id
+POST http://localhost:8080/api/trips/af5940706acc45c688cefee7c4ee336f/report
+Content-Type: application/json
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+{
+  "trajectoryUrl": "https://restapi.amap.com/v3/staticmap?key=bc02d1f93e142eb512f2a9d058d32560&size=750*400&scale=2&traffic=0&paths=8,0x3366FF,1,,:121.4737,31.2304;121.5073,31.2987;121.43233597344802,31.020729302720287&markers=mid,0x00AA00,S:121.4737,31.2304%7Cmid,0xDD0000,E:121.43233597344802,31.020729302720287",
+  "steps": 8500,
+  "powerCost": 450,
+  "durationMin": 120,
+  "theme": "nature"
+}
+
+### 7. AI 自动生成行程计划 (Generate Itinerary)
+# @name generateItinerary
+POST http://localhost:8080/api/itinerary/generate
+Content-Type: application/json
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+{
+  "departure": "Shanghai",
+  "destination": "Paris, France",
+  "days": 3,
+  "interests": ["Museums", "Food", "History"],
+  "budgetLevel": "Medium",
+  "additionalNotes": "Prefer walking tours."
+}
+
+### 8. AI 自动生成短途/自然风光行程计划 (Generate Itinerary - Nature/Short)
+# @name generateNatureItinerary
+POST http://localhost:8080/api/itinerary/generate
+Content-Type: application/json
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+{
+  "departure": "Beijing",
+  "destination": "Hangzhou",
+  "days": 2,
+  "interests": ["Nature", "Photography", "Relaxation"],
+  "budgetLevel": "Low",
+  "additionalNotes": "Love lakes and tea culture. Please recommend budget-friendly local food."
+}
+
+### 9. 保存/创建行程计划 (Save Itinerary)
+# 自动使用上一个接口返回的内容
+# @name saveItinerary
+POST http://localhost:8080/api/itinerary/save
+Content-Type: application/json
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+{{generateItinerary.response.body.data}}
+
+
+### 10. 获取已保存的行程计划详情 (Get Itinerary Detail)
+# 自动使用保存接口返回的 itineraryId
+GET http://localhost:8080/api/itinerary/detail/073bb601-189a-431b-b6c8-8364d293e478
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+
+### 11. 获取您的所有行程 ID 列表 (Get All Itineraries)
+GET http://localhost:8080/api/itinerary/getall
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIxIiwiZXhwIjoxNzcyNzY4MzgxfQ.bRcFCwakdMTNnisN2AsDYCiKxyEVLkAb6C4rYkiE11c
+
+
+### 12. 根据用户ID获取其所有行程的 ID 列表 (Get All Itinerary IDs By User ID)
+# 假设上面的 token 对应的 userId 为 1
+GET http://localhost:8080/api/itinerary/user/1
+

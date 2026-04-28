@@ -1,0 +1,78 @@
+{
+        "title": "上海至巴黎三日文化与美食之旅",
+        "estimatedCost": 1500.0,
+        "totalDays": 3,
+        "dailyPlans": [
+            {
+                "dayNumber": 1,
+                "items": [
+                    {
+                        "type": "景点",
+                        "name": "卢浮宫",
+                        "description": "世界著名的艺术博物馆，收藏了大量珍贵艺术品，包括蒙娜丽莎和胜利女神像。",
+                        "location": "Rue de Rivoli, 75001 Paris",
+                        "itemCost": 15.0,
+                        "timeCost": "3小时"
+                    },
+                    {
+                        "type": "餐饮",
+                        "name": "Le Comptoir du Relais",
+                        "description": "一家历史悠久的法国餐厅，提供传统法式美食和精致的葡萄酒。",
+                        "location": "13 Rue du Foin, 75006 Paris",
+                        "itemCost": 50.0,
+                        "timeCost": "2小时"
+                    }
+                ]
+            },
+            {
+                "dayNumber": 2,
+                "items": [
+                    {
+                        "type": "景点",
+                        "name": "巴黎圣母院",
+                        "description": "哥特式建筑的代表，拥有悠久的历史和文化价值。",
+                        "location": "6 Parvis Notre-Dame, 75004 Paris",
+                        "itemCost": 12.0,
+                        "timeCost": "2小时"
+                    },
+                    {
+                        "type": "餐饮",
+                        "name": "Le Jules Verne",
+                        "description": "位于埃菲尔铁塔内的餐厅，提供浪漫的用餐体验和精致的法式料理。",
+                        "location": "25 Avenue Anatole France, 75007 Paris",
+                        "itemCost": 60.0,
+                        "timeCost": "2小时"
+                    },
+                    {
+                        "type": "购物",
+                        "name": "巴黎老佛爷百货",
+                        "description": "欧洲最大的百货公司之一，提供高端品牌和法国特色商品。",
+                        "location": "104 Boulevard Haussmann, 75009 Paris",
+                        "itemCost": 100.0,
+                        "timeCost": "1小时"
+                    }
+                ]
+            },
+            {
+                "dayNumber": 3,
+                "items": [
+                    {
+                        "type": "景点",
+                        "name": "蒙马特高地",
+                        "description": "巴黎的艺术与文化中心，拥有圣心堂和画家广场等著名景点。",
+                        "location": "18 Place du Tertre, 75018 Paris",
+                        "itemCost": 8.0,
+                        "timeCost": "2小时"
+                    },
+                    {
+                        "type": "餐饮",
+                        "name": "Le Café de l'Escargot",
+                        "description": "一家经典的巴黎餐厅，提供地道的法式菜肴和舒适的用餐环境。",
+                        "location": "11 Rue des Abbesses, 75005 Paris",
+                        "itemCost": 45.0,
+                        "timeCost": "1.5小时"
+                    }
+                ]
+            }
+        ]
+    }

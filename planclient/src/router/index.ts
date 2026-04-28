@@ -1,0 +1,65 @@
+import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
+import Login from '../views/user/Login.vue'
+
+const BattleCockpit = () => import('../views/battle/BattleCockpit.vue')
+const BattleCustomizePlan = () => import('../views/battle/BattleCustomizePlan.vue')
+
+const router = createRouter({
+  history: createWebHistory(import.meta.env.BASE_URL),
+  scrollBehavior(_to, _from, savedPosition) {
+    if (savedPosition) return savedPosition
+    return { top: 0 }
+  },
+  routes: [
+    {
+      path: '/',
+      redirect: '/dashboard'
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: Login
+    },
+    {
+      path: '/dashboard',
+      name: 'dashboard',
+      component: () => import('../views/user/Dashboard.vue')
+    },
+    {
+      path: '/battle',
+      name: 'BattleCockpit',
+      component: BattleCockpit
+    },
+    {
+      path: '/battle/create',
+      name: 'BattleCustomizePlan',
+      component: BattleCustomizePlan
+    }
+  ]
+})
+
+const routesRequireAuth = [
+  '/battle',
+  '/battle/create'
+]
+
+router.beforeEach((to, _from, next) => {
+  if (!routesRequireAuth.includes(to.path)) {
+    return next()
+  }
+
+  const authStore = useAuthStore()
+  const isLoggedIn = Boolean((authStore.token && authStore.token.length > 0) || authStore.user)
+
+  if (!isLoggedIn) {
+    import('element-plus').then(({ ElMessage }) => {
+      ElMessage.warning('请先登录')
+    })
+    return next({ path: '/login', query: { redirect: to.fullPath } })
+  }
+
+  next()
+})
+
+export default router
