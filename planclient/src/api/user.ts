@@ -37,6 +37,6 @@ export function getHealthInformation(username: string) {
     return axios.get<ApiResponse<any>>(`${USER_MODULE}/health/${username}`)
 }
 
-export function register(data: { username: string; password: string; email?: string }) {
-    return axios.post<ApiResponse<string>>(`${USER_MODULE}/register`, data)
+export function register(data: { username: string; password: string; email?: string; name?: string }) {
+    return axios.post<ApiResponse<string>>(`${USER_MODULE}`, data)
 }

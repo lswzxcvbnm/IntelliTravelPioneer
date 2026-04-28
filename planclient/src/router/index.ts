@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import Login from '../views/user/Login.vue'
+import Register from '../views/user/Register.vue'
 
 const BattleCockpit = () => import('../views/battle/BattleCockpit.vue')
 const BattleCustomizePlan = () => import('../views/battle/BattleCustomizePlan.vue')
@@ -20,6 +21,11 @@ const router = createRouter({
       path: '/login',
       name: 'login',
       component: Login
+    },
+    {
+      path: '/register',
+      name: 'register',
+      component: Register
     },
     {
       path: '/dashboard',

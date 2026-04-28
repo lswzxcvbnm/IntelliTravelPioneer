@@ -62,8 +62,15 @@ export interface ItineraryVO {
     updateTime: string
 }
 
+export interface PhaseData {
+    type: string
+    message: string
+}
+
 export async function generateItineraryStream(
     data: ItineraryRequest,
+    onPhase: (phase: PhaseData) => void,
+    onThought: (msg: string) => void,
     onToolCall: (msg: string) => void,
     onResult: (plan: ItineraryPlan) => void,
     onError: (err: any) => void
@@ -110,7 +117,11 @@ export async function generateItineraryStream(
                 } else if (line === '') {
                     if (eventName && eventData) {
                         try {
-                            if (eventName === 'tool') {
+                            if (eventName === 'phase') {
+                                onPhase(JSON.parse(eventData));
+                            } else if (eventName === 'thought') {
+                                onThought(eventData);
+                            } else if (eventName === 'tool') {
                                 onToolCall(eventData);
                             } else if (eventName === 'result') {
                                 onResult(JSON.parse(eventData));

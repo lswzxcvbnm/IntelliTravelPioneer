@@ -1,5 +1,6 @@
 package com.travel.intellitravel_pioneer.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travel.intellitravel_pioneer.service.ItineraryService;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryPlan;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryRequest;
@@ -8,6 +9,7 @@ import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryVO;
 import com.travel.intellitravel_pioneer.vo.common.Response;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -30,11 +32,13 @@ public class ItineraryController {
         return Response.buildSuccess(plan);
     }
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @PostMapping(value = "/generate/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter generateItineraryStream(
             @RequestHeader("token") String token,
             @RequestBody ItineraryRequest request) {
-        // 5 minutes timeout to ensure slow agents can finish
         SseEmitter emitter = new SseEmitter(300000L);
 
         emitter.onTimeout(() -> {
@@ -45,11 +49,27 @@ public class ItineraryController {
             try {
                 ItineraryPlan plan = itineraryService.generateItinerary(token, request, message -> {
                     try {
-                        emitter.send(SseEmitter.event()
-                                .name("tool")
-                                .data(message));
+                        if (message.startsWith("PHASE:")) {
+                            String body = message.substring(6);
+                            int colonIdx = body.indexOf(":");
+                            if (colonIdx > 0) {
+                                String phaseType = body.substring(0, colonIdx);
+                                String phaseMsg = body.substring(colonIdx + 1);
+                                emitter.send(SseEmitter.event()
+                                        .name("phase")
+                                        .data(objectMapper.writeValueAsString(
+                                                Map.of("type", phaseType, "message", phaseMsg))));
+                            }
+                        } else if (message.startsWith("THOUGHT:")) {
+                            emitter.send(SseEmitter.event()
+                                    .name("thought")
+                                    .data(message.substring(8)));
+                        } else {
+                            emitter.send(SseEmitter.event()
+                                    .name("tool")
+                                    .data(message));
+                        }
                     } catch (Exception e) {
-                        // If sending fails (e.g. client disconnected), we might want to log it
                     }
                 });
                 emitter.send(SseEmitter.event()
@@ -61,7 +81,6 @@ public class ItineraryController {
                     emitter.send(SseEmitter.event().name("error").data(e.getMessage()));
                     emitter.completeWithError(e);
                 } catch (Exception ex) {
-                    // ignore
                 }
             }
         });

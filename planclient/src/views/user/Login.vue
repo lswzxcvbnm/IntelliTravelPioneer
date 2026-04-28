@@ -86,47 +86,48 @@ const handleLogin = async () => {
   align-items: center;
   justify-content: center;
   background: linear-gradient(180deg, #FFFFFF 0%, #F7FBFF 50%, #F4F9FF 100%);
-  padding: 20px;
+  padding: 40px 20px;
 }
 
 .login-container {
   width: 100%;
-  max-width: 400px;
+  max-width: 440px;
 }
 
 .login-header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 40px;
 }
 
 .login-header h1 {
-  margin: 0 0 8px;
-  font-size: 28px;
+  margin: 0 0 10px;
+  font-size: 32px;
   font-weight: 700;
   color: #3385FF;
+  letter-spacing: 1px;
 }
 
 .login-header p {
   margin: 0;
   color: #7A9AC4;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .login-form {
   background: #fff;
   border-radius: 20px;
-  padding: 28px;
+  padding: 36px 32px;
   box-shadow: 0 4px 24px rgba(51, 133, 255, 0.08);
   border: 1px solid rgba(92, 168, 255, 0.1);
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 22px;
 }
 
 .form-group label {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   font-size: 14px;
   font-weight: 600;
   color: #2D4A6F;
@@ -134,7 +135,7 @@ const handleLogin = async () => {
 
 .form-group input {
   width: 100%;
-  padding: 12px 16px;
+  padding: 14px 16px;
   border: 1.5px solid rgba(92, 168, 255, 0.15);
   border-radius: 12px;
   font-size: 15px;
@@ -142,6 +143,7 @@ const handleLogin = async () => {
   background: #FAFCFF;
   transition: all 0.2s;
   box-sizing: border-box;
+  height: 50px;
 }
 
 .form-group input:focus {
@@ -155,7 +157,7 @@ const handleLogin = async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
 }
 
 .remember-me {
@@ -163,23 +165,24 @@ const handleLogin = async () => {
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   color: #6B8CBE;
 }
 
 .error-msg {
-  margin: 0 0 16px;
-  padding: 10px 14px;
+  margin: 0 0 20px;
+  padding: 12px 16px;
   background: #FFF5F5;
   color: #E53E3E;
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 14px;
   border-left: 3px solid #E53E3E;
 }
 
 .btn-login {
   width: 100%;
-  padding: 14px;
+  padding: 15px;
+  height: 52px;
   background: linear-gradient(135deg, #3385FF 0%, #1A6FFF 100%);
   color: #fff;
   border: none;
@@ -203,7 +206,7 @@ const handleLogin = async () => {
 
 .login-footer {
   text-align: center;
-  margin-top: 20px;
+  margin-top: 28px;
   color: #7A9AC4;
   font-size: 14px;
 }
@@ -212,5 +215,9 @@ const handleLogin = async () => {
   color: #3385FF;
   text-decoration: none;
   font-weight: 600;
+}
+
+.login-footer a:hover {
+  text-decoration: underline;
 }
 </style>
