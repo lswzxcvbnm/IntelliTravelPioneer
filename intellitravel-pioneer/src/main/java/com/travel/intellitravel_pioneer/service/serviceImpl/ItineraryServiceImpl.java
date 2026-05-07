@@ -156,8 +156,13 @@ public class ItineraryServiceImpl implements ItineraryService {
             throw new IntellitravelException("itineraryId is required");
         }
 
+        String userId = String.valueOf(tokenUtil.getUser(token).getId());
         ItineraryPO itinerary = itineraryRepository.findById(itineraryId)
                 .orElseThrow(() -> new IntellitravelException("itinerary not found"));
+
+        if (!itinerary.getUserId().equals(userId)) {
+            throw new IntellitravelException("access denied: itinerary does not belong to user");
+        }
 
         return ItineraryVO.builder()
                 .id(itinerary.getId())

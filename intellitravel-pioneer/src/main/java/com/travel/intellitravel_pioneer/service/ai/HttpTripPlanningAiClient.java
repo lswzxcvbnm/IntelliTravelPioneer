@@ -60,6 +60,9 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     @Value("${trip.ai.llm.temperature:0.2}")
     private Double llmTemperature;
 
+    @Value("${trip.ai.amap.mcp-url:https://mcp.amap.com/sse?key=bc02d1f93e142eb512f2a9d058d32560}")
+    private String amapMcpUrl;
+
     public HttpTripPlanningAiClient(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
@@ -105,7 +108,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private GenerationResult callLlmForRefine(ItineraryRequest request, String currentPlanJson,
             String userPrompt, java.util.function.Consumer<String> toolNotifier) {
         GenerationStats stats = new GenerationStats();
-        String amapUrl = "https://mcp.amap.com/sse?key=bc02d1f93e142eb512f2a9d058d32560";
+        String amapUrl = amapMcpUrl;
         try (AmapMcpClient mcpClient = new AmapMcpClient(amapUrl)) {
             mcpClient.initialize();
 
@@ -213,6 +216,8 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             2.【新增或替换地点】（如"加一个故宫""把长城换成颐和园""再加一天"）
                → 必须调用 maps_text_search 查询新地点的真实名称和精确经纬度，
                  验证通过后才写入 JSON。严禁凭空编造坐标。
+               → 如果 maps_text_search 返回空结果，尝试修改搜索关键词（如去掉"市/区"后缀），
+                 若仍无结果，在 Thought 中说明并在最终结果中使用用户提供的名称，location 标注为 null。
 
             3.【仅修改描述/预算】（如"门票改成60元""预算调整为2000"）
                → 不需要调用工具，直接修改对应字段。
@@ -220,7 +225,15 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             【输出规范】
             - 不改动的部分原样保留
             - Thought 里说明每一步操作
-            - 新增/替换地点后做 SelfCheck 验证
+            - 新增/替换地点后必须做 SelfCheck
+
+            【SelfCheck 自检（输出前必须完成）】
+            Thought: SelfCheck:
+            OK 新增地点坐标来自工具返回 -> [已验证/存在未验证项]
+            OK 删除操作正确执行 -> [已完成]
+            OK 预算仍与需求匹配 -> [匹配]
+            OK description 控制在30字以内 -> [通过]
+
             - 最终用 final_output 包裹完整修正 JSON，中间不要有其他文字
 
             JSON 格式：
@@ -257,67 +270,49 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
     // ==================== Execute System Prompt ====================
     private static final String EXECUTE_SYSTEM_PROMPT_PREFIX = """
-            你是一位具备自主规划能力的旅行 Agent。你不是一个简单的"收到请求-输出结果"的工具，
-            而是一个会主动思考、分析、验证并执行计划的智能旅行规划师。
+            你是一位具备自主规划能力的旅行 Agent，会主动思考、分析、验证并执行计划。
 
-            【Agent 核心能力要求】
+            【工作流程】
+            遵循制定好的执行规划，按子任务顺序执行。每一轮按以下格式输出：
 
-            ========================================
-            第一步：任务理解与分解（参照已制定的执行规划）
-            ========================================
-            你必须遵循制定好的执行规划，按子任务顺序执行。每一轮，按以下格式输出：
+            Thought: [分析当前进度，说明本轮要完成什么子任务，为什么需要调用工具]
 
-            Thought: [分析当前进度，说明本轮要完成哪个子任务，为什么需要调用某个工具]
+            【核心规则】
+            1. 鼓励并行：同时查天气+搜索景点，不要逐个来。Thought 要具体，如"子任务1.天气侦察：北京3天需查3天预报来决定户外/室内分配"
+            2. 失败处理：工具调用失败时在 Thought 中说明，并尝试备选方案（换关键词或使用其他工具替代）
+            3. 严禁编造：所有地点名称和坐标必须来自工具返回结果
+            4. 每天至少安排 2-3 个行程项
+            5. **天数硬约束：totalDays 和 dailyPlans 的数量必须严格等于用户请求的天数（request.days），不多不少！绝对不能重复生成相同 dayNumber 的计划**
 
-            ========================================
-            第二步：思考与执行（ReAct 循环）
-            ========================================
-            关键要求：
-            - Thought 必须具体，如"子任务1.天气侦察：用户去北京3天，我需要查3天预报来决定户外/室内分配"
-            - 鼓励并行：同时查天气+搜索景点，而不是一个一个来
-            - 失败处理：工具调用失败时，在 Thought 中说明，并尝试备选方案
-            - 必须使用提供的工具查询和验证每一个景点的真实性和经纬度。严禁伪造、猜测或生成不存在的地点名称和坐标。
+            【可用工具】
+            - 高德地图工具（maps_开头）：查询真实地理信息、天气、路线，验证地点经纬度
+            - search_destination_info：查询目的地旅行季节、热门景点、当地美食、交通建议
 
-            【可用外部工具说明】
-            你有以下两类工具可以使用：
-            一类是高德地图工具（maps_开头），用于查询真实地理信息、天气、路线等；
-            另一类是旅行知识工具：
-            - search_destination_info：查询目的地的旅行季节、热门景点、当地美食、交通建议等实用信息，
-              在制定规划策略阶段就应调用，获取景点和美食启发。
-
-            ========================================
-            【停止规则 — 必须遵守】
-            ========================================
-            你最多只能进行有限的几轮工具调用。当你完成以下所有步骤后，必须立即停止调用工具：
+            【停止规则】
+            最多 10 轮工具调用。完成以下所有步骤后立即停止并输出最终结果：
             1. 已查询目的地天气
             2. 已搜索并验证足够的景点（每天至少 2-3 个）
             3. 已搜索必要的餐饮/住宿信息
-            4. 已完成自检
+            4. 已完成 SelfCheck 自检
+            信息足够后直接输出 final_output，不要再调用工具。
 
-            当你认为信息已经足够后，直接输出 final_output，不要再调用工具。
-            如果你已经调用了超过 5 轮工具，无论是否满意，都必须停止并输出最终结果。
-
-            ========================================
-            第三步：质量自检（最终交付前必须完成）
-            ========================================
-            在输出最终 JSON 之前，在 Thought 中输出自检结果：
-
+            【SelfCheck 自检（输出前必须完成）】
             Thought: SelfCheck:
-            OK 每天至少3个行程项 -> [实际: Day1=X项 Day2=X项 ...]
-            OK 所有地点名称来自工具返回结果 -> [已验证]
+            OK totalDays 等于用户请求天数 -> [请求N天, 输出M天, 一致/不一致]
+            OK dailyPlans 数量等于 totalDays -> [dailyPlans有X项, totalDays=Y]
+            OK 每个 dayNumber 不重复且连续从1到totalDays -> [已检查]
+            OK 每天至少3个行程项 -> [实际: Day1=X项 ...]
+            OK 所有地点名称来自工具返回 -> [已验证]
             OK 所有坐标来自工具返回 -> [已验证]
             OK 无模糊描述 -> [全部具体]
 
-            最终用 final_output 标签包裹输出纯 JSON，格式：
+            【最终输出格式】
+            用 final_output 标签包裹纯 JSON：
             final_output
-            {"title":"...", "estimatedCost":1500.0, "totalDays":3, "dailyPlans":[...]}
+            {"title":"...", "estimatedCost":1500.0, "totalDays":N, "dailyPlans":[{"dayNumber":1, "items":[{"type":"景点|餐饮|住宿|购物","name":"具体地点名称","description":"详细描述（30字以内）","location":{"lat":39.9163,"lng":116.3971,"name":"位置名称"}}]}]}
             /final_output
-
-            JSON中 dailyPlans 的每一项格式：
-            {"dayNumber":1, "items":[{"type":"景点|餐饮|住宿|购物","name":"具体地点名称","description":"详细描述","location":{"lat":39.9163,"lng":116.3971,"name":"位置名称"}}]}
-            注意：description 每条控制在 30 字以内，简洁说明特色即可，不要长篇大论。
-
-            final_output 标签外的任何内容（包括 Thought、SelfCheck）都不会进入最终结果！""";
+            其中 N 必须严格等于用户 request 中的 days 字段值。
+            final_output 标签外的任何内容都不会进入最终结果。""";
 
     // ==================== Verify System Prompt ====================
     private static final String VERIFY_SYSTEM_PROMPT = """
@@ -524,7 +519,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private GenerationResult callLlmForItinerary(ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier) {
         GenerationStats stats = new GenerationStats();
-        String amapUrl = "https://mcp.amap.com/sse?key=bc02d1f93e142eb512f2a9d058d32560";
+        String amapUrl = amapMcpUrl;
         try (AmapMcpClient mcpClient = new AmapMcpClient(amapUrl)) {
             mcpClient.initialize();
 
@@ -656,7 +651,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private ItineraryPlan runAgentLoop(List<Map<String, Object>> messages, JsonNode tools,
             AmapMcpClient mcpClient, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier, GenerationStats stats) throws Exception {
-        int maxTurns = 15;
+        int maxTurns = 10;
         for (int i = 0; i < maxTurns; i++) {
             System.out.println("Agent turn " + (i + 1));
             JsonNode response = callLlmChat(messages, tools);
@@ -826,25 +821,63 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     finalContent = retryMessage.path("content").asText("");
                 }
 
-                ItineraryPlan plan = parseItinerary(finalContent);
+                if (!finalContent.contains("final_output") && !finalContent.contains("{")) {
+                    System.out.println("Agent turn " + (i + 1) + " produced thought without final output, continuing...");
+                    if (toolNotifier != null) {
+                        String thought = extractThought(finalContent);
+                        if (thought == null) {
+                            thought = finalContent.length() > 200 ? finalContent.substring(0, 200) + "..." : finalContent;
+                        }
+                        toolNotifier.accept("THOUGHT:" + thought);
+                    }
+                    Map<String, Object> continueMsg = new HashMap<>();
+                    continueMsg.put("role", "user");
+                    continueMsg.put("content", "请继续执行任务。如果所有必要信息已收集完毕，请立即用final_output标签输出完整的行程JSON。如果还需要查询信息，请调用相应的工具。");
+                    messages.add(continueMsg);
+                    continue;
+                }
+
+                ItineraryPlan plan;
+                try {
+                    plan = parseItinerary(finalContent);
+                } catch (Exception parseErr) {
+                    System.out.println("Parse failed in agent turn " + (i + 1) + ": " + parseErr.getMessage()
+                            + ", retrying with streaming...");
+                    messages.remove(messages.size() - 1);
+                    if (toolNotifier != null) {
+                        toolNotifier.accept("THOUGHT:输出解析失败，切换为流式模式重新生成完整行程...");
+                    }
+                    JsonNode streamResponse = callLlmChatStreaming(messages);
+                    JsonNode streamChoices = streamResponse.path("choices");
+                    if (!streamChoices.isArray() || streamChoices.isEmpty()) {
+                        throw new IntellitravelException("AI 流式响应返回为空");
+                    }
+                    plan = parseItinerary(streamChoices.get(0).path("message").path("content").asText(""));
+                }
                 if (plan != null && plan.getDestination() == null && request.getDestination() != null) {
                     plan.setDestination(request.getDestination());
                 }
-                return plan;
+                return normalizePlan(plan, request, toolNotifier);
             }
         }
         // maxTurns exhausted: force LLM to produce final answer
-        System.out.println("Max turns reached, forcing final answer...");
+        System.out.println("Max turns reached, forcing final answer via streaming...");
         Map<String, Object> forceMsg = new HashMap<>();
         forceMsg.put("role", "user");
         forceMsg.put("content", "你已经完成了所有必要的查询。现在请立即输出完整的行程JSON，用final_output包裹。不要再调用任何工具，直接输出最终结果。");
         messages.add(forceMsg);
         if (toolNotifier != null) {
             try {
-                toolNotifier.accept("THOUGHT:已达到最大轮次限制，正在强制要求输出最终结果...");
+                toolNotifier.accept("THOUGHT:已达到最大轮次限制，正在通过流式模式强制生成最终结果...");
             } catch (Exception ignored) {}
         }
-        JsonNode finalResponse = callLlmChat(messages, null, 16384);
+        JsonNode finalResponse;
+        try {
+            finalResponse = callLlmChatStreaming(messages);
+        } catch (Exception streamingErr) {
+            System.out.println("Streaming failed at max turns, falling back to normal call: " + streamingErr.getMessage());
+            finalResponse = callLlmChat(messages, null, 16384);
+        }
         accumulateUsageFromResponse(finalResponse, stats);
         stats.setExecuteCalls(stats.getExecuteCalls() + 1);
         JsonNode finalChoices = finalResponse.path("choices");
@@ -875,13 +908,46 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             if (plan.getDestination() == null && request.getDestination() != null) {
                 plan.setDestination(request.getDestination());
             }
-            return plan;
+            return normalizePlan(plan, request, toolNotifier);
         }
         throw new IntellitravelException("AI 认真思考了太久，暂时无法完成复杂的规划，请换个简单点的要求试试吧～");
     }
 
     private boolean isCustomTool(String name) {
         return "search_destination_info".equals(name);
+    }
+
+    private ItineraryPlan normalizePlan(ItineraryPlan plan, ItineraryRequest request,
+            java.util.function.Consumer<String> toolNotifier) {
+        if (plan == null || plan.getDailyPlans() == null || plan.getDailyPlans().isEmpty()) {
+            return plan;
+        }
+        int requestedDays = request.getDays() != null ? request.getDays() : 1;
+        int actualDays = plan.getDailyPlans().size();
+
+        if (actualDays != requestedDays) {
+            System.out.println("Day count mismatch: user requested " + requestedDays
+                    + " days but LLM returned " + actualDays + " daily plans");
+            if (toolNotifier != null) {
+                try {
+                    toolNotifier.accept("THOUGHT:天数不一致（用户请求" + requestedDays
+                            + "天，AI生成了" + actualDays + "天），正在自动修正...");
+                } catch (Exception ignored) {}
+            }
+            if (actualDays > requestedDays) {
+                plan.setDailyPlans(new ArrayList<>(plan.getDailyPlans().subList(0, requestedDays)));
+                System.out.println("Truncated " + (actualDays - requestedDays)
+                        + " extra day(s) from plan output");
+            }
+        }
+
+        plan.setTotalDays(requestedDays);
+        List<com.travel.intellitravel_pioneer.vo.itinerary.DayPlan> normalizedPlans = plan.getDailyPlans();
+        for (int i = 0; i < normalizedPlans.size(); i++) {
+            normalizedPlans.get(i).setDayNumber(i + 1);
+        }
+
+        return plan;
     }
 
     private static class VerifyResult {
@@ -1189,8 +1255,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     }
 
     private String tryBracketRepair(String json) {
-        int braceOpen = 0;
-        int bracketOpen = 0;
+        java.util.List<Character> openStack = new java.util.ArrayList<>();
         boolean inString = false;
         boolean escaped = false;
 
@@ -1200,17 +1265,22 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             if (c == '\\' && inString) { escaped = true; continue; }
             if (c == '"') { inString = !inString; continue; }
             if (inString) continue;
-            if (c == '{') braceOpen++;
-            else if (c == '}') braceOpen = Math.max(0, braceOpen - 1);
-            else if (c == '[') bracketOpen++;
-            else if (c == ']') bracketOpen = Math.max(0, bracketOpen - 1);
+            if (c == '{' || c == '[') {
+                openStack.add(c);
+            } else if (c == '}') {
+                removeLastOpen(openStack, '{');
+            } else if (c == ']') {
+                removeLastOpen(openStack, '[');
+            }
         }
 
-        if (braceOpen == 0 && bracketOpen == 0) return null;
+        if (openStack.isEmpty()) return null;
 
         StringBuilder sb = new StringBuilder(json);
-        for (int i = 0; i < bracketOpen; i++) sb.append(']');
-        for (int i = 0; i < braceOpen; i++) sb.append('}');
+        for (int i = openStack.size() - 1; i >= 0; i--) {
+            char opener = openStack.get(i);
+            sb.append(opener == '{' ? '}' : ']');
+        }
 
         String repaired = sb.toString();
         try {
@@ -1219,6 +1289,15 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    private void removeLastOpen(java.util.List<Character> stack, char expectedOpen) {
+        for (int j = stack.size() - 1; j >= 0; j--) {
+            if (stack.get(j) == expectedOpen) {
+                stack.remove(j);
+                return;
+            }
+        }
     }
 
     private String stripIncompleteValue(String json) {
@@ -1344,7 +1423,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         if (overrideMaxTokens != null) {
             body.put("max_tokens", overrideMaxTokens);
         } else if (tools != null && !tools.isEmpty()) {
-            body.put("max_tokens", 8192);
+            body.put("max_tokens", 16384);
         }
 
         String jsonBody;
@@ -1375,6 +1454,92 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     (raw != null && raw.length() > 500 ? raw.substring(0, 500) + "..." : raw));
             System.err.println("==========================================");
             throw new IntellitravelException("解读 AI 响应数据出现小问题，请再试一次哦～");
+        }
+    }
+
+    private JsonNode callLlmChatStreaming(List<Map<String, Object>> messages) {
+        if (llmApiKey == null || llmApiKey.isBlank()) {
+            throw new IntellitravelException("未配置 AI 密钥，请联系系统管理员");
+        }
+
+        String requestUrl = llmBaseUrl + llmChatPath;
+
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("model", llmModel);
+        body.put("temperature", llmTemperature);
+        body.put("stream", true);
+        body.set("messages", objectMapper.valueToTree(messages));
+
+        String jsonBody;
+        try {
+            jsonBody = objectMapper.writeValueAsString(body);
+        } catch (Exception e) {
+            throw new IntellitravelException("准备 AI 流式请求数据失败，请重试～");
+        }
+
+        HttpClient streamingClient = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(requestUrl))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + llmApiKey)
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build();
+
+        try {
+            HttpResponse<String> response = streamingClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                String errBody = response.body() != null ? response.body() : "";
+                throw new IntellitravelException("AI 流式请求失败 (HTTP " + response.statusCode() + "): " +
+                        (errBody.length() > 300 ? errBody.substring(0, 300) + "..." : errBody));
+            }
+
+            StringBuilder contentBuilder = new StringBuilder();
+            String[] lines = response.body().split("\\r?\\n");
+            for (String line : lines) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("data:")) {
+                    String data = trimmed.substring(5).trim();
+                    if ("[DONE]".equals(data)) {
+                        break;
+                    }
+                    try {
+                        JsonNode chunk = objectMapper.readTree(data);
+                        JsonNode choices = chunk.path("choices");
+                        if (choices.isArray() && !choices.isEmpty()) {
+                            JsonNode delta = choices.get(0).path("delta");
+                            if (delta.has("content") && !delta.get("content").isNull()) {
+                                contentBuilder.append(delta.get("content").asText());
+                            }
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+
+            String fullContent = contentBuilder.toString();
+            if (fullContent.isBlank()) {
+                throw new IntellitravelException("AI 流式响应未产生任何内容");
+            }
+
+            ObjectNode responseNode = objectMapper.createObjectNode();
+            ArrayNode choicesArr = responseNode.putArray("choices");
+            ObjectNode choice = choicesArr.addObject();
+            choice.put("index", 0);
+            ObjectNode msg = choice.putObject("message");
+            msg.put("role", "assistant");
+            msg.put("content", fullContent);
+            choice.put("finish_reason", "stop");
+
+            return responseNode;
+        } catch (IntellitravelException ie) {
+            throw ie;
+        } catch (Exception e) {
+            System.err.println("====== LLM 流式请求异常 ======");
+            System.err.println("异常类型: " + e.getClass().getName());
+            System.err.println("异常信息: " + e.getMessage());
+            System.err.println("==========================================");
+            throw new IntellitravelException("AI 流式生成过程中出现问题，请稍后重试～");
         }
     }
 
