@@ -7,6 +7,7 @@ import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryRequest;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItinerarySaveRequest;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryVO;
 import com.travel.intellitravel_pioneer.vo.common.Response;
+import com.travel.intellitravel_pioneer.vo.trip.GenerationResult;
 
 import java.util.List;
 import java.util.Map;
@@ -66,7 +67,7 @@ public class ItineraryController {
                 System.out.println("====== Starting generateItinerary SSE ======");
                 System.out.println("Request: destination=" + request.getDestination() + ", days=" + request.getDays());
                 
-                ItineraryPlan plan = itineraryService.generateItinerary(token, request, message -> {
+                GenerationResult result = itineraryService.generateItineraryWithStats(token, request, message -> {
                     try {
                         if (message.startsWith("PHASE:")) {
                             String body = message.substring(6);
@@ -94,11 +95,18 @@ public class ItineraryController {
                 });
                 
                 System.out.println("====== generateItinerary completed, sending result ======");
-                String planJson = objectMapper.writeValueAsString(plan);
+                String planJson = objectMapper.writeValueAsString(result.getPlan());
                 System.out.println("Result JSON length: " + planJson.length());
                 emitter.send(SseEmitter.event()
                         .name("result")
                         .data(planJson));
+
+                if (result.getStats() != null) {
+                    String statsJson = objectMapper.writeValueAsString(result.getStats());
+                    emitter.send(SseEmitter.event()
+                            .name("stats")
+                            .data(statsJson));
+                }
                 
                 if (completed.compareAndSet(false, true)) {
                     emitter.complete();
@@ -163,7 +171,7 @@ public class ItineraryController {
                         body.get("currentPlan"), ItineraryPlan.class);
                 String userPrompt = (String) body.get("userPrompt");
 
-                ItineraryPlan plan = itineraryService.modifyItinerary(token, request,
+                GenerationResult result = itineraryService.modifyItineraryWithStats(token, request,
                         currentPlan, userPrompt, message -> {
                     try {
                         if (message.startsWith("PHASE:")) {
@@ -191,9 +199,16 @@ public class ItineraryController {
                 });
                 
                 System.out.println("====== modifyItinerary completed, sending result ======");
-                String planJson = objectMapper.writeValueAsString(plan);
+                String planJson = objectMapper.writeValueAsString(result.getPlan());
                 System.out.println("Result JSON length: " + planJson.length());
                 emitter.send(SseEmitter.event().name("result").data(planJson));
+
+                if (result.getStats() != null) {
+                    String statsJson = objectMapper.writeValueAsString(result.getStats());
+                    emitter.send(SseEmitter.event()
+                            .name("stats")
+                            .data(statsJson));
+                }
                 
                 if (completed.compareAndSet(false, true)) {
                     emitter.complete();

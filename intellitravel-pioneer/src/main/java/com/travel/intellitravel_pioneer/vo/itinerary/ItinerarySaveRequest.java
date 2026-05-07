@@ -1,6 +1,7 @@
 package com.travel.intellitravel_pioneer.vo.itinerary;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.travel.intellitravel_pioneer.vo.trip.GenerationStats;
 import lombok.Data;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -28,4 +29,7 @@ public class ItinerarySaveRequest {
 
     @JsonProperty("dailyPlans")
     private List<DayPlan> dailyPlans;
+
+    @JsonProperty("stats")
+    private GenerationStats stats;
 }

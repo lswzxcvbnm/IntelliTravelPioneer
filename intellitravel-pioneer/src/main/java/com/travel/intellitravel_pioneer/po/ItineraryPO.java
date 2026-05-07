@@ -1,7 +1,9 @@
 package com.travel.intellitravel_pioneer.po;
 
+import com.travel.intellitravel_pioneer.po.converter.GenerationStatsJsonConverter;
 import com.travel.intellitravel_pioneer.po.converter.ItineraryPlanJsonConverter;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryPlan;
+import com.travel.intellitravel_pioneer.vo.trip.GenerationStats;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -35,6 +37,10 @@ public class ItineraryPO {
     @Convert(converter = ItineraryPlanJsonConverter.class)
     @Column(name = "plan", columnDefinition = "TEXT")
     private ItineraryPlan plan;
+
+    @Convert(converter = GenerationStatsJsonConverter.class)
+    @Column(name = "stats", columnDefinition = "TEXT")
+    private GenerationStats stats;
 
     @Column(name = "create_time")
     private LocalDateTime createTime;

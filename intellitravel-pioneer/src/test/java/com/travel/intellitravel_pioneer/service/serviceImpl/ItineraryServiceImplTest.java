@@ -11,6 +11,7 @@ import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryPlan;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryRequest;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItinerarySaveRequest;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryVO;
+import com.travel.intellitravel_pioneer.vo.trip.GenerationResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -100,8 +101,8 @@ class ItineraryServiceImplTest {
     @Test
     @DisplayName("生成行程规划 - 成功生成")
     void testGenerateItinerary_Success() {
-        when(tripPlanningAiClient.generateItinerary(eq(testToken), eq(testRequest), any()))
-                .thenReturn(testItineraryPlan);
+        when(tripPlanningAiClient.generateItineraryWithStats(eq(testToken), eq(testRequest), any()))
+                .thenReturn(new GenerationResult(testItineraryPlan, null));
 
         ItineraryPlan result = itineraryService.generateItinerary(testToken, testRequest);
 
@@ -144,7 +145,7 @@ class ItineraryServiceImplTest {
     @Test
     @DisplayName("生成行程规划 - AI客户端异常抛出异常")
     void testGenerateItinerary_AiClientException() {
-        when(tripPlanningAiClient.generateItinerary(eq(testToken), eq(testRequest), any()))
+        when(tripPlanningAiClient.generateItineraryWithStats(eq(testToken), eq(testRequest), any()))
                 .thenThrow(new RuntimeException("AI service error"));
 
         IntellitravelException exception = assertThrows(

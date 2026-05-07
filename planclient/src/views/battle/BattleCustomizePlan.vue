@@ -248,6 +248,40 @@
             </div>
           </div>
 
+          <div class="summary-section" v-if="activeStats">
+            <div class="summary-section-title">📊 Token 消耗</div>
+            <div class="summary-stats">
+              <div class="summary-stat">
+                <span class="summary-stat-label">总计 Token</span>
+                <span class="summary-stat-value">{{ activeStats.totalTokens.toLocaleString() }}</span>
+              </div>
+              <div class="summary-stat">
+                <span class="summary-stat-label">提示词 Token</span>
+                <span class="summary-stat-value">{{ activeStats.totalPromptTokens.toLocaleString() }}</span>
+              </div>
+              <div class="summary-stat">
+                <span class="summary-stat-label">生成 Token</span>
+                <span class="summary-stat-value">{{ activeStats.totalCompletionTokens.toLocaleString() }}</span>
+              </div>
+              <div class="summary-stat">
+                <span class="summary-stat-label">API 调用</span>
+                <span class="summary-stat-value">{{ activeStats.planCalls + activeStats.executeCalls + activeStats.verifyCalls }} 次</span>
+              </div>
+            </div>
+
+            <div class="summary-section" v-if="activeStats.toolCalls && activeStats.toolCalls.length > 0">
+              <div class="summary-section-title">🔧 工具调用明细（{{ activeStats.toolCalls.length }} 次）</div>
+              <div class="tool-call-list">
+                <div class="tool-call-item" v-for="(tc, idx) in activeStats.toolCalls" :key="idx">
+                  <span class="tool-call-status" :class="tc.status === 'success' ? 'status-ok' : 'status-fail'">
+                    {{ tc.status === 'success' ? '✓' : '✗' }}
+                  </span>
+                  <span class="tool-call-name">{{ tc.displayName }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="summary-section" v-if="generatingLogs.length > 0">
             <div class="summary-section-title">生成过程回顾</div>
             <div v-for="(entry, idx) in generatingLogs" :key="'g'+idx" class="log-row mini">
@@ -283,7 +317,7 @@ import {
   saveItinerary,
   updateItinerary
 } from '../../api/itinerary'
-import type { ItineraryPlan, ItineraryRequest, PhaseData } from '../../api/itinerary'
+import type { ItineraryPlan, ItineraryRequest, PhaseData, GenerationStats, ToolCallRecord } from '../../api/itinerary'
 import { goBackByAppRule } from '../../composables/useBackHandler'
 
 const router = useRouter()
@@ -311,6 +345,9 @@ const refinePrompt = ref('')
 const isRefining = ref(false)
 const refineLogs = ref<LogEntry[]>([])
 const refineCurrentPhase = ref('')
+const generationStats = ref<GenerationStats | null>(null)
+const refineStats = ref<GenerationStats | null>(null)
+const loadedStats = ref<GenerationStats | null>(null)
 
 const itineraryId = computed(() => String(route.query.itineraryId || ''))
 const isEditMode = computed(() => itineraryId.value.length > 0)
@@ -325,6 +362,13 @@ const activeAgentLogs = computed(() => {
   if (isLoadingGenerate.value) return generatingLogs.value
   if (isRefining.value) return refineLogs.value
   return []
+})
+
+const activeStats = computed(() => {
+  if (generationStats.value) return generationStats.value
+  if (refineStats.value) return refineStats.value
+  if (loadedStats.value) return loadedStats.value
+  return null
 })
 
 watch(activeAgentLogs, async () => {
@@ -509,6 +553,7 @@ const handleGenerate = async () => {
   errorMessage.value = ''
   generatingLogs.value = []
   currentPhase.value = ''
+  generationStats.value = null
   const ve = validateRequest(); if (ve) { errorMessage.value = ve; return }
   isLoadingGenerate.value = true
   try {
@@ -518,14 +563,15 @@ const handleGenerate = async () => {
       (msg: string) => { generatingLogs.value.push({ type: 'thought', message: msg }) },
       (msg: string) => { generatingLogs.value.push({ type: 'tool', message: getLogMessage(msg) }) },
       (plan) => { editablePlan.value = normalizePlan(plan); step.value = 2; isLoadingGenerate.value = false },
-      (error) => { errorMessage.value = error.message || '生成报错，请稍后重试。'; isLoadingGenerate.value = false }
+      (error) => { errorMessage.value = error.message || '生成报错，请稍后重试。'; isLoadingGenerate.value = false },
+      (stats) => { generationStats.value = stats }
     )
   } catch (error: any) { errorMessage.value = '生成失败，请稍后重试。'; isLoadingGenerate.value = false }
 }
 
 const handleAiRefine = async () => {
   if (!refinePrompt.value.trim() || !editablePlan.value) return
-  isRefining.value = true; refineLogs.value = []; refineCurrentPhase.value = ''
+  isRefining.value = true; refineLogs.value = []; refineCurrentPhase.value = ''; refineStats.value = null
   const originalPlan = { ...editablePlan.value }
 
   try {
@@ -535,13 +581,14 @@ const handleAiRefine = async () => {
       refinePrompt.value,
       (phase: PhaseData) => { refineLogs.value.push({ type: 'phase', message: phase.message, phaseType: phase.type }); refineCurrentPhase.value = phase.type },
       (msg: string) => { refineLogs.value.push({ type: 'thought', message: msg }) },
-      (msg) => { refineLogs.value.push({ type: 'tool', message: getLogMessage(msg) }) },
-      (plan) => {
+      (msg: string) => { refineLogs.value.push({ type: 'tool', message: getLogMessage(msg) }) },
+      (plan: ItineraryPlan) => {
         editablePlan.value = mergeRefinedPlan(originalPlan, normalizePlan(plan))
         isRefining.value = false
         refinePrompt.value = ''
       },
-      (error) => { ElMessageBox.alert(error.message || '修改报错', 'AI修改失败', { type: 'error' }); isRefining.value = false }
+      (error: any) => { ElMessageBox.alert(error.message || '修改报错', 'AI修改失败', { type: 'error' }); isRefining.value = false },
+      (stats: GenerationStats) => { refineStats.value = stats }
     )
   } catch (error: any) { ElMessageBox.alert(error.message || '修改失败', 'AI修改失败', { type: 'error' }); isRefining.value = false }
 }
@@ -599,6 +646,7 @@ const loadDetailForEdit = async () => {
   try {
     const r = await getItineraryDetail(itineraryId.value)
     editablePlan.value = normalizePlan(r.data.data.plan)
+    loadedStats.value = r.data.data.stats || null
     savedItineraryId.value = r.data.data.id; step.value = 2
   } catch { errorMessage.value = '加载已有计划失败。' } finally { isLoadingGenerate.value = false }
 }
@@ -614,12 +662,13 @@ const savePlan = async () => {
   errorMessage.value = ''; const ve = validatePlan(); if (ve) { errorMessage.value = ve; return }
   if (!editablePlan.value) return
   isSaving.value = true
+  const stats = generationStats.value || refineStats.value || loadedStats.value || undefined
   try {
     if (isEditMode.value) {
-      await updateItinerary(itineraryId.value, { ...editablePlan.value, destination: request.destination.trim() })
+      await updateItinerary(itineraryId.value, { ...editablePlan.value, destination: request.destination.trim(), stats })
       savedItineraryId.value = itineraryId.value; step.value = 3
     } else {
-      const r = await saveItinerary({ ...editablePlan.value, destination: request.destination.trim(), dailyPlans: editablePlan.value.dailyPlans })
+      const r = await saveItinerary({ ...editablePlan.value, destination: request.destination.trim(), dailyPlans: editablePlan.value.dailyPlans, stats })
       savedItineraryId.value = r.data.data; step.value = 3
     }
   } catch { errorMessage.value = '保存失败，请稍后重试。' } finally { isSaving.value = false }
@@ -1564,5 +1613,41 @@ textarea {
 
 .agent-panel-idle-content strong {
   color: #3385FF;
+}
+
+.tool-call-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-call-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #FAFCFF;
+  border-radius: 8px;
+  border: 1px solid rgba(51, 133, 255, 0.06);
+  font-size: 12px;
+}
+
+.tool-call-status {
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.tool-call-status.status-ok {
+  color: #10b981;
+}
+
+.tool-call-status.status-fail {
+  color: #ef4444;
+}
+
+.tool-call-name {
+  color: #1E3A5F;
+  font-weight: 500;
 }
 </style>

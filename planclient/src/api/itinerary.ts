@@ -50,6 +50,7 @@ export interface ItinerarySaveRequest {
     totalDays: number
     destination?: string
     dailyPlans: DayPlan[]
+    stats?: GenerationStats
 }
 
 export interface ItineraryVO {
@@ -58,6 +59,7 @@ export interface ItineraryVO {
     title: string
     destination?: string
     plan: ItineraryPlan
+    stats?: GenerationStats
     createTime: string
     updateTime: string
 }
@@ -67,13 +69,30 @@ export interface PhaseData {
     message: string
 }
 
+export interface ToolCallRecord {
+    name: string
+    displayName: string
+    status: string
+}
+
+export interface GenerationStats {
+    totalPromptTokens: number
+    totalCompletionTokens: number
+    totalTokens: number
+    toolCalls: ToolCallRecord[]
+    planCalls: number
+    executeCalls: number
+    verifyCalls: number
+}
+
 export async function generateItineraryStream(
     data: ItineraryRequest,
     onPhase: (phase: PhaseData) => void,
     onThought: (msg: string) => void,
     onToolCall: (msg: string) => void,
     onResult: (plan: ItineraryPlan) => void,
-    onError: (err: any) => void
+    onError: (err: any) => void,
+    onStats?: (stats: GenerationStats) => void
 ) {
     const token = getAuthToken();
     try {
@@ -135,6 +154,10 @@ export async function generateItineraryStream(
                             } else if (eventName === 'error') {
                                 console.error('Received error event:', eventData);
                                 onError(new Error(eventData));
+                            } else if (eventName === 'stats') {
+                                if (onStats) {
+                                    onStats(JSON.parse(eventData));
+                                }
                             }
                         } catch (e) {
                             console.error('Failed to process event/data:', eventName, eventData, e);
@@ -164,7 +187,8 @@ export async function modifyItineraryStream(
     onThought: (msg: string) => void,
     onToolCall: (msg: string) => void,
     onResult: (plan: ItineraryPlan) => void,
-    onError: (err: any) => void
+    onError: (err: any) => void,
+    onStats?: (stats: GenerationStats) => void
 ) {
     const token = getAuthToken();
     try {
@@ -226,6 +250,10 @@ export async function modifyItineraryStream(
                             } else if (eventName === 'error') {
                                 console.error('Received error event (modify):', eventData);
                                 onError(new Error(eventData));
+                            } else if (eventName === 'stats') {
+                                if (onStats) {
+                                    onStats(JSON.parse(eventData));
+                                }
                             }
                         } catch (e) {
                             console.error('Failed to process event/data:', eventName, eventData, e);

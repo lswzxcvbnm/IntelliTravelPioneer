@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.travel.intellitravel_pioneer.exception.IntellitravelException;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryPlan;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryRequest;
+import com.travel.intellitravel_pioneer.vo.trip.GenerationResult;
+import com.travel.intellitravel_pioneer.vo.trip.GenerationStats;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -64,11 +66,12 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
     @Override
     public ItineraryPlan generateItinerary(String token, ItineraryRequest request) {
-        return generateItinerary(token, request, null);
+        GenerationResult result = generateItineraryWithStats(token, request, null);
+        return result != null ? result.getPlan() : null;
     }
 
     @Override
-    public ItineraryPlan generateItinerary(String token, ItineraryRequest request,
+    public GenerationResult generateItineraryWithStats(String token, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier) {
         if (isLlmProvider()) {
             return callLlmForItinerary(request, toolNotifier);
@@ -78,17 +81,19 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         requestBody.put("request", request);
 
         String rawResponse = callCustomAiService(aiPlanPath, token, requestBody);
-        return parseItinerary(rawResponse);
+        ItineraryPlan plan = parseItinerary(rawResponse);
+        return new GenerationResult(plan, null);
     }
 
     @Override
     public ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
             ItineraryPlan currentPlan, String userPrompt) {
-        return modifyItinerary(token, request, currentPlan, userPrompt, null);
+        GenerationResult result = modifyItineraryWithStats(token, request, currentPlan, userPrompt, null);
+        return result != null ? result.getPlan() : null;
     }
 
     @Override
-    public ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
+    public GenerationResult modifyItineraryWithStats(String token, ItineraryRequest request,
             ItineraryPlan currentPlan, String userPrompt,
             java.util.function.Consumer<String> toolNotifier) {
         if (!isLlmProvider()) {
@@ -97,8 +102,9 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         return callLlmForRefine(request, toJsonString(currentPlan), userPrompt, toolNotifier);
     }
 
-    private ItineraryPlan callLlmForRefine(ItineraryRequest request, String currentPlanJson,
+    private GenerationResult callLlmForRefine(ItineraryRequest request, String currentPlanJson,
             String userPrompt, java.util.function.Consumer<String> toolNotifier) {
+        GenerationStats stats = new GenerationStats();
         String amapUrl = "https://mcp.amap.com/sse?key=bc02d1f93e142eb512f2a9d058d32560";
         try (AmapMcpClient mcpClient = new AmapMcpClient(amapUrl)) {
             mcpClient.initialize();
@@ -119,7 +125,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             int maxExecuteRetries = 2;
             while (true) {
                 try {
-                    refinedPlan = runAgentLoop(messages, tools, mcpClient, request, toolNotifier);
+                    refinedPlan = runAgentLoop(messages, tools, mcpClient, request, toolNotifier, stats);
                     break;
                 } catch (IntellitravelException ie) {
                     throw ie;
@@ -139,7 +145,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             sendPhaseNotification(toolNotifier, "REFINE_END",
                     "行程修改完成，共" + (refinedPlan.getDailyPlans() != null ? refinedPlan.getDailyPlans().size() : 0) + "天");
 
-            return refinedPlan;
+            return new GenerationResult(refinedPlan, stats);
 
         } catch (IntellitravelException ie) {
             throw ie;
@@ -515,8 +521,9 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         return db;
     }
 
-    private ItineraryPlan callLlmForItinerary(ItineraryRequest request,
+    private GenerationResult callLlmForItinerary(ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier) {
+        GenerationStats stats = new GenerationStats();
         String amapUrl = "https://mcp.amap.com/sse?key=bc02d1f93e142eb512f2a9d058d32560";
         try (AmapMcpClient mcpClient = new AmapMcpClient(amapUrl)) {
             mcpClient.initialize();
@@ -536,6 +543,8 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             String planContent;
             try {
                 JsonNode planResponse = callLlmChat(planMessages, null, 2048);
+                accumulateUsageFromResponse(planResponse, stats);
+                stats.setPlanCalls(1);
                 JsonNode planChoices = planResponse.path("choices");
                 if (!planChoices.isArray() || planChoices.isEmpty()) {
                     throw new IntellitravelException("AI规划阶段返回为空");
@@ -564,7 +573,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 messages.add(Map.of("role", "user", "content", userInput));
 
                 try {
-                    draftPlan = runAgentLoop(messages, tools, mcpClient, request, toolNotifier);
+                    draftPlan = runAgentLoop(messages, tools, mcpClient, request, toolNotifier, stats);
                     break;
                 } catch (IntellitravelException ie) {
                     throw ie;
@@ -594,7 +603,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             verifyMessages.add(Map.of("role", "user", "content",
                     buildVerifyUserContent(request, draftPlan)));
 
-            VerifyResult verifyResult = runVerifyPhase(verifyMessages, toolNotifier, draftPlan);
+            VerifyResult verifyResult = runVerifyPhase(verifyMessages, toolNotifier, draftPlan, stats);
             String verifySummary = verifyResult.summary;
             if (verifyResult.correctedPlan != null && verifyResult.correctedPlan != draftPlan) {
                 draftPlan = verifyResult.correctedPlan;
@@ -604,7 +613,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             sendPhaseNotification(toolNotifier, "VERIFY_END", verifySummary);
 
-            return draftPlan;
+            return new GenerationResult(draftPlan, stats);
 
         } catch (IntellitravelException ie) {
             throw ie;
@@ -646,11 +655,13 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
     private ItineraryPlan runAgentLoop(List<Map<String, Object>> messages, JsonNode tools,
             AmapMcpClient mcpClient, ItineraryRequest request,
-            java.util.function.Consumer<String> toolNotifier) throws Exception {
+            java.util.function.Consumer<String> toolNotifier, GenerationStats stats) throws Exception {
         int maxTurns = 15;
         for (int i = 0; i < maxTurns; i++) {
             System.out.println("Agent turn " + (i + 1));
             JsonNode response = callLlmChat(messages, tools);
+            accumulateUsageFromResponse(response, stats);
+            stats.setExecuteCalls(stats.getExecuteCalls() + 1);
             JsonNode choices = response.path("choices");
             if (choices.isEmpty()) {
                 throw new IntellitravelException("AI 没有返回任何内容，请稍候再试呀～");
@@ -773,6 +784,11 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                         }
                     }
 
+                    stats.getToolCalls().add(new GenerationStats.ToolCallRecord(
+                            name,
+                            toolDisplayName(name),
+                            result != null && result.startsWith("Error") ? "failed" : "success"));
+
                     Map<String, Object> toolMsg = new HashMap<>();
                     toolMsg.put("role", "tool");
                     toolMsg.put("tool_call_id", id);
@@ -795,6 +811,8 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     messages.remove(messages.size() - 1);
                     // Retry with larger max_tokens context
                     JsonNode retryResponse = callLlmChat(messages, tools, 16384);
+                    accumulateUsageFromResponse(retryResponse, stats);
+                    stats.setExecuteCalls(stats.getExecuteCalls() + 1);
                     JsonNode retryChoices = retryResponse.path("choices");
                     if (!retryChoices.isArray() || retryChoices.isEmpty()) {
                         throw new IntellitravelException("AI 重试后未返回内容");
@@ -827,6 +845,8 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             } catch (Exception ignored) {}
         }
         JsonNode finalResponse = callLlmChat(messages, null, 16384);
+        accumulateUsageFromResponse(finalResponse, stats);
+        stats.setExecuteCalls(stats.getExecuteCalls() + 1);
         JsonNode finalChoices = finalResponse.path("choices");
         if (!finalChoices.isArray() || finalChoices.isEmpty()) {
             throw new IntellitravelException("AI 认真思考了太久，暂时无法完成复杂的规划，请换个简单点的要求试试吧～");
@@ -840,6 +860,8 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 toolNotifier.accept("THOUGHT:最终输出被截断，尝试无上限重新生成...");
             }
             JsonNode retryResponse = callLlmChat(messages, null, null);
+            accumulateUsageFromResponse(retryResponse, stats);
+            stats.setExecuteCalls(stats.getExecuteCalls() + 1);
             JsonNode retryChoices = retryResponse.path("choices");
             if (retryChoices.isArray() && !retryChoices.isEmpty()) {
                 finalChoices = retryChoices;
@@ -873,7 +895,8 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     }
 
     private VerifyResult runVerifyPhase(List<Map<String, Object>> messages,
-            java.util.function.Consumer<String> toolNotifier, ItineraryPlan originalDraft) {
+            java.util.function.Consumer<String> toolNotifier, ItineraryPlan originalDraft,
+            GenerationStats stats) {
         int retryCount = 0;
         int maxVerifyRetries = 2;
         String lastResult = "审核完成";
@@ -881,6 +904,8 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         while (retryCount < maxVerifyRetries) {
             try {
                 JsonNode response = callLlmChat(messages, null);
+                accumulateUsageFromResponse(response, stats);
+                stats.setVerifyCalls(stats.getVerifyCalls() + 1);
                 JsonNode choices = response.path("choices");
                 if (!choices.isArray() || choices.isEmpty()) {
                     return new VerifyResult("审核异常", originalDraft);
@@ -987,6 +1012,37 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         } catch (Exception e) {
             throw new IntellitravelException("Failed to build GPT request: " + e.getMessage());
         }
+    }
+
+    private void accumulateUsageFromResponse(JsonNode response, GenerationStats stats) {
+        JsonNode usage = response.path("usage");
+        if (!usage.isMissingNode()) {
+            stats.setTotalPromptTokens(stats.getTotalPromptTokens() + usage.path("prompt_tokens").asInt(0));
+            stats.setTotalCompletionTokens(stats.getTotalCompletionTokens() + usage.path("completion_tokens").asInt(0));
+            stats.setTotalTokens(stats.getTotalTokens() + usage.path("total_tokens").asInt(0));
+        }
+    }
+
+    private String toolDisplayName(String name) {
+        return switch (name) {
+            case "maps_weather" -> "天气查询";
+            case "maps_text_search" -> "地点搜索";
+            case "maps_around_search" -> "周边搜索";
+            case "maps_search_detail" -> "地点详情查询";
+            case "maps_direction_driving" -> "驾车路线规划";
+            case "maps_direction_walking" -> "步行路线规划";
+            case "maps_direction_bicycling" -> "骑行路线规划";
+            case "maps_direction_transit_integrated" -> "公共交通路线规划";
+            case "maps_distance" -> "测距";
+            case "maps_geo" -> "坐标解析";
+            case "maps_regeocode" -> "地址解析";
+            case "maps_ip_location" -> "IP定位";
+            case "maps_schema_personal_map" -> "地图展示";
+            case "maps_schema_navi" -> "导航链接";
+            case "maps_schema_take_taxi" -> "打车链接";
+            case "search_destination_info" -> "目的地信息查询";
+            default -> name;
+        };
     }
 
     private String stripCodeFence(String text) {
