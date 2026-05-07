@@ -15,6 +15,20 @@ backend-build:
   stage: build
   image: maven:3.9-eclipse-temurin-17
   script:
+    - mkdir -p /root/.m2
+    - cat > /root/.m2/settings.xml << 'EOF'
+      <?xml version="1.0" encoding="UTF-8"?>
+      <settings>
+        <mirrors>
+          <mirror>
+            <id>aliyun</id>
+            <name>Aliyun Maven Mirror</name>
+            <url>https://maven.aliyun.com/repository/central</url>
+            <mirrorOf>central</mirrorOf>
+          </mirror>
+        </mirrors>
+      </settings>
+      EOF
     - cd intellitravel-pioneer
     - ./mvnw clean package -Dmaven.test.skip=true -B
   artifacts:
