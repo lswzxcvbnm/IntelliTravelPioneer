@@ -30,6 +30,29 @@ public class ItineraryServiceImpl implements ItineraryService {
     private TokenUtil tokenUtil;
 
     @Override
+    public ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
+            ItineraryPlan currentPlan, String userPrompt) {
+        return modifyItinerary(token, request, currentPlan, userPrompt, null);
+    }
+
+    @Override
+    public ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
+            ItineraryPlan currentPlan, String userPrompt,
+            java.util.function.Consumer<String> toolNotifier) {
+        if (token == null || token.isBlank()) {
+            throw new IntellitravelException("token is required");
+        }
+        if (request == null || currentPlan == null) {
+            throw new IntellitravelException("request and currentPlan are required");
+        }
+        try {
+            return tripPlanningAiClient.modifyItinerary(token, request, currentPlan, userPrompt, toolNotifier);
+        } catch (Exception e) {
+            throw new IntellitravelException("Failed to modify itinerary: " + e.getMessage());
+        }
+    }
+
+    @Override
     public ItineraryPlan generateItinerary(String token, ItineraryRequest request) {
         return generateItinerary(token, request, null);
     }

@@ -52,7 +52,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     @Value("${trip.ai.llm.api-key:}")
     private String llmApiKey;
 
-    @Value("${trip.ai.llm.model:Pro/zai-org/GLM-5}")
+    @Value("${trip.ai.llm.model:Qwen/Qwen3-8B}")
     private String llmModel;
 
     @Value("${trip.ai.llm.temperature:0.2}")
@@ -79,6 +79,74 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
         String rawResponse = callCustomAiService(aiPlanPath, token, requestBody);
         return parseItinerary(rawResponse);
+    }
+
+    @Override
+    public ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
+            ItineraryPlan currentPlan, String userPrompt) {
+        return modifyItinerary(token, request, currentPlan, userPrompt, null);
+    }
+
+    @Override
+    public ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
+            ItineraryPlan currentPlan, String userPrompt,
+            java.util.function.Consumer<String> toolNotifier) {
+        if (!isLlmProvider()) {
+            throw new IntellitravelException("非 LLM 模式下暂不支持行程修改");
+        }
+        return callLlmForRefine(request, toJsonString(currentPlan), userPrompt, toolNotifier);
+    }
+
+    private ItineraryPlan callLlmForRefine(ItineraryRequest request, String currentPlanJson,
+            String userPrompt, java.util.function.Consumer<String> toolNotifier) {
+        String amapUrl = "https://mcp.amap.com/sse?key=bc02d1f93e142eb512f2a9d058d32560";
+        try (AmapMcpClient mcpClient = new AmapMcpClient(amapUrl)) {
+            mcpClient.initialize();
+
+            JsonNode mcpTools = mcpClient.listTools();
+            JsonNode tools = mergeTools(mcpTools);
+
+            sendPhaseNotification(toolNotifier, "REFINE_START",
+                    "开始分析修改建议，调用工具验证新地点...");
+
+            List<Map<String, Object>> messages = new ArrayList<>();
+            messages.add(Map.of("role", "system", "content", REFINE_SYSTEM_PROMPT));
+            messages.add(Map.of("role", "user", "content",
+                "当前已有行程计划：\n" + currentPlanJson + "\n\n用户修改建议：\n" + userPrompt));
+
+            ItineraryPlan refinedPlan;
+            int executeRetries = 0;
+            int maxExecuteRetries = 2;
+            while (true) {
+                try {
+                    refinedPlan = runAgentLoop(messages, tools, mcpClient, request, toolNotifier);
+                    break;
+                } catch (IntellitravelException ie) {
+                    throw ie;
+                } catch (Exception e) {
+                    executeRetries++;
+                    System.err.println("Refine phase failed (attempt " + executeRetries + "): " + e.getMessage());
+                    if (executeRetries >= maxExecuteRetries) {
+                        throw new IntellitravelException("行程修改失败（已重试" + executeRetries + "次）：" + e.getMessage());
+                    }
+                    if (toolNotifier != null) {
+                        toolNotifier.accept("THOUGHT:修改阶段异常（第" + executeRetries + "次），正在重新初始化...");
+                    }
+                    try { Thread.sleep(1500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); throw ie; }
+                }
+            }
+
+            sendPhaseNotification(toolNotifier, "REFINE_END",
+                    "行程修改完成，共" + (refinedPlan.getDailyPlans() != null ? refinedPlan.getDailyPlans().size() : 0) + "天");
+
+            return refinedPlan;
+
+        } catch (IntellitravelException ie) {
+            throw ie;
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new IntellitravelException("啊哦，修改行程时遇到了小阻碍，请稍后重试哦～");
+        }
     }
 
     private String callCustomAiService(String path, String token, Object requestBody) {
@@ -125,6 +193,36 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private boolean isLlmProvider() {
         return "llm".equalsIgnoreCase(aiProvider);
     }
+
+    // ==================== Refine System Prompt ====================
+    private static final String REFINE_SYSTEM_PROMPT = """
+            你是一位行程修改 Agent。你将收到一份已有行程计划（JSON 格式）和用户的修改建议。
+            你的任务是分析用户意图，对已有行程执行精确修改，并调用必要的工具验证新地点的真实性。
+
+            【意图识别与操作】
+
+            1.【纯删除意图】（如"删掉故宫""去掉第2天"）
+               → 不需要调用任何工具，直接在已有 JSON 上删除指定条目。
+
+            2.【新增或替换地点】（如"加一个故宫""把长城换成颐和园""再加一天"）
+               → 必须调用 maps_text_search 查询新地点的真实名称和精确经纬度，
+                 验证通过后才写入 JSON。严禁凭空编造坐标。
+
+            3.【仅修改描述/预算】（如"门票改成60元""预算调整为2000"）
+               → 不需要调用工具，直接修改对应字段。
+
+            【输出规范】
+            - 不改动的部分原样保留
+            - Thought 里说明每一步操作
+            - 新增/替换地点后做 SelfCheck 验证
+            - 最终用 final_output 包裹完整修正 JSON，中间不要有其他文字
+
+            JSON 格式：
+            {"title":"...", "estimatedCost":1500.0, "totalDays":3,
+             "dailyPlans":[{"dayNumber":1, "items":[{"type":"景点|餐饮|住宿|购物",
+             "name":"具体地点名称","description":"详细描述",
+             "location":{"lat":39.9163,"lng":116.3971,"name":"位置名称"}}]}]}
+            注意：description 每条控制在 30 字以内，简洁说明特色即可。""";
 
     // ==================== Plan System Prompt ====================
     private static final String PLAN_SYSTEM_PROMPT = """
@@ -182,6 +280,18 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
               在制定规划策略阶段就应调用，获取景点和美食启发。
 
             ========================================
+            【停止规则 — 必须遵守】
+            ========================================
+            你最多只能进行有限的几轮工具调用。当你完成以下所有步骤后，必须立即停止调用工具：
+            1. 已查询目的地天气
+            2. 已搜索并验证足够的景点（每天至少 2-3 个）
+            3. 已搜索必要的餐饮/住宿信息
+            4. 已完成自检
+
+            当你认为信息已经足够后，直接输出 final_output，不要再调用工具。
+            如果你已经调用了超过 5 轮工具，无论是否满意，都必须停止并输出最终结果。
+
+            ========================================
             第三步：质量自检（最终交付前必须完成）
             ========================================
             在输出最终 JSON 之前，在 Thought 中输出自检结果：
@@ -199,6 +309,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             JSON中 dailyPlans 的每一项格式：
             {"dayNumber":1, "items":[{"type":"景点|餐饮|住宿|购物","name":"具体地点名称","description":"详细描述","location":{"lat":39.9163,"lng":116.3971,"name":"位置名称"}}]}
+            注意：description 每条控制在 30 字以内，简洁说明特色即可，不要长篇大论。
 
             final_output 标签外的任何内容（包括 Thought、SelfCheck）都不会进入最终结果！""";
 
@@ -424,9 +535,12 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             String planContent;
             try {
-                JsonNode planResponse = callLlmChat(planMessages, null);
-                planContent = planResponse.path("choices").get(0)
-                        .path("message").path("content").asText("");
+                JsonNode planResponse = callLlmChat(planMessages, null, 2048);
+                JsonNode planChoices = planResponse.path("choices");
+                if (!planChoices.isArray() || planChoices.isEmpty()) {
+                    throw new IntellitravelException("AI规划阶段返回为空");
+                }
+                planContent = planChoices.get(0).path("message").path("content").asText("");
             } catch (Exception e) {
                 sendPhaseNotification(toolNotifier, "PLAN_END",
                         "规划阶段调用失败，跳过规划直接执行...");
@@ -480,10 +594,15 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             verifyMessages.add(Map.of("role", "user", "content",
                     buildVerifyUserContent(request, draftPlan)));
 
-            String verifyResult = runVerifyPhase(verifyMessages, toolNotifier);
+            VerifyResult verifyResult = runVerifyPhase(verifyMessages, toolNotifier, draftPlan);
+            String verifySummary = verifyResult.summary;
+            if (verifyResult.correctedPlan != null && verifyResult.correctedPlan != draftPlan) {
+                draftPlan = verifyResult.correctedPlan;
+                int correctedDays = draftPlan.getDailyPlans() != null ? draftPlan.getDailyPlans().size() : 0;
+                verifySummary += "（行程已自动修正，现共" + correctedDays + "天）";
+            }
 
-            sendPhaseNotification(toolNotifier, "VERIFY_END",
-                    verifyResult);
+            sendPhaseNotification(toolNotifier, "VERIFY_END", verifySummary);
 
             return draftPlan;
 
@@ -528,7 +647,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private ItineraryPlan runAgentLoop(List<Map<String, Object>> messages, JsonNode tools,
             AmapMcpClient mcpClient, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier) throws Exception {
-        int maxTurns = 30;
+        int maxTurns = 15;
         for (int i = 0; i < maxTurns; i++) {
             System.out.println("Agent turn " + (i + 1));
             JsonNode response = callLlmChat(messages, tools);
@@ -564,6 +683,15 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     JsonNode functionNode = toolCall.path("function");
                     String name = functionNode.path("name").asText();
                     String args = functionNode.path("arguments").asText("{}");
+                    // Attempt to repair truncated JSON from LLM
+                    String repairedArgs = repairTruncatedJson(args);
+                    if (!repairedArgs.equals(args)) {
+                        System.out.println("Repaired truncated tool arguments for " + name);
+                        if (toolNotifier != null) {
+                            toolNotifier.accept("THOUGHT:工具 " + name + " 的参数 JSON 不完整，已自动修复。");
+                        }
+                    }
+                    args = repairedArgs;
 
                     System.out.println("Invoking tool: " + name);
                     if (toolNotifier != null) {
@@ -595,10 +723,30 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                             }
                             break;
                         } catch (Exception e) {
+                            String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                            boolean isJsonParseError = errMsg.contains("end-of-input")
+                                    || errMsg.contains("expected close marker")
+                                    || errMsg.contains("Unexpected character")
+                                    || errMsg.contains("Unrecognized token")
+                                    || e instanceof com.fasterxml.jackson.core.JsonProcessingException;
+
+                            // JSON parse errors mean the LLM sent malformed args — retry is useless
+                            if (isJsonParseError) {
+                                result = "Error: 工具 " + name + " 的参数 JSON 格式不完整或损坏，无法解析。"
+                                        + "请检查 arguments 是否为完整合法的 JSON，重新发起调用。"
+                                        + " 错误详情: " + errMsg;
+                                if (toolNotifier != null) {
+                                    try {
+                                        toolNotifier.accept("THOUGHT:工具 " + name + " 的参数 JSON 格式错误，将告知Agent修正后重新调用。");
+                                    } catch (Exception ignored) {}
+                                }
+                                break;
+                            }
+
                             toolRetries++;
-                            System.err.println("Tool " + name + " failed (attempt " + toolRetries + "): " + e.getMessage());
+                            System.err.println("Tool " + name + " failed (attempt " + toolRetries + "): " + errMsg);
                             if (toolRetries >= maxToolRetries) {
-                                result = "Error executing tool " + name + " after " + toolRetries + " attempts: " + e.getMessage()
+                                result = "Error executing tool " + name + " after " + toolRetries + " attempts: " + errMsg
                                         + ". 建议更换关键词或使用其他工具替代。";
                                 if (toolNotifier != null) {
                                     try {
@@ -633,13 +781,79 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     messages.add(toolMsg);
                 }
             } else {
-                String finalContent = message.path("content").asText();
+                // No tool_calls — LLM produced final output
+                String finalContent = message.path("content").asText("");
+
+                // Check if the output was truncated due to token limit
+                String finishReason = choices.get(0).path("finish_reason").asText("");
+                if ("length".equals(finishReason)) {
+                    System.out.println("Agent turn " + (i + 1) + " output truncated (finish_reason=length), retrying with larger max_tokens...");
+                    if (toolNotifier != null) {
+                        toolNotifier.accept("THOUGHT:输出被截断，正在用更大上下文重新生成...");
+                    }
+                    // Remove the truncated assistant message
+                    messages.remove(messages.size() - 1);
+                    // Retry with larger max_tokens context
+                    JsonNode retryResponse = callLlmChat(messages, tools, 16384);
+                    JsonNode retryChoices = retryResponse.path("choices");
+                    if (!retryChoices.isArray() || retryChoices.isEmpty()) {
+                        throw new IntellitravelException("AI 重试后未返回内容");
+                    }
+                    JsonNode retryMessage = retryChoices.get(0).path("message");
+                    if (retryMessage.has("tool_calls") && !retryMessage.get("tool_calls").isEmpty()) {
+                        // LLM decided to use tools again, add to messages and continue loop
+                        messages.add(objectMapper.convertValue(retryMessage, Map.class));
+                        continue;
+                    }
+                    finalContent = retryMessage.path("content").asText("");
+                }
+
                 ItineraryPlan plan = parseItinerary(finalContent);
                 if (plan != null && plan.getDestination() == null && request.getDestination() != null) {
                     plan.setDestination(request.getDestination());
                 }
                 return plan;
             }
+        }
+        // maxTurns exhausted: force LLM to produce final answer
+        System.out.println("Max turns reached, forcing final answer...");
+        Map<String, Object> forceMsg = new HashMap<>();
+        forceMsg.put("role", "user");
+        forceMsg.put("content", "你已经完成了所有必要的查询。现在请立即输出完整的行程JSON，用final_output包裹。不要再调用任何工具，直接输出最终结果。");
+        messages.add(forceMsg);
+        if (toolNotifier != null) {
+            try {
+                toolNotifier.accept("THOUGHT:已达到最大轮次限制，正在强制要求输出最终结果...");
+            } catch (Exception ignored) {}
+        }
+        JsonNode finalResponse = callLlmChat(messages, null, 16384);
+        JsonNode finalChoices = finalResponse.path("choices");
+        if (!finalChoices.isArray() || finalChoices.isEmpty()) {
+            throw new IntellitravelException("AI 认真思考了太久，暂时无法完成复杂的规划，请换个简单点的要求试试吧～");
+        }
+
+        // Check finish_reason and retry if truncated
+        String finalFinishReason = finalChoices.get(0).path("finish_reason").asText("");
+        if ("length".equals(finalFinishReason)) {
+            System.out.println("Force output truncated, retrying without max_tokens limit...");
+            if (toolNotifier != null) {
+                toolNotifier.accept("THOUGHT:最终输出被截断，尝试无上限重新生成...");
+            }
+            JsonNode retryResponse = callLlmChat(messages, null, null);
+            JsonNode retryChoices = retryResponse.path("choices");
+            if (retryChoices.isArray() && !retryChoices.isEmpty()) {
+                finalChoices = retryChoices;
+            }
+        }
+
+        String finalContent = finalChoices.get(0)
+                .path("message").path("content").asText("");
+        ItineraryPlan plan = parseItinerary(finalContent);
+        if (plan != null && plan.getDailyPlans() != null && !plan.getDailyPlans().isEmpty()) {
+            if (plan.getDestination() == null && request.getDestination() != null) {
+                plan.setDestination(request.getDestination());
+            }
+            return plan;
         }
         throw new IntellitravelException("AI 认真思考了太久，暂时无法完成复杂的规划，请换个简单点的要求试试吧～");
     }
@@ -648,16 +862,30 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         return "search_destination_info".equals(name);
     }
 
-    private String runVerifyPhase(List<Map<String, Object>> messages,
-            java.util.function.Consumer<String> toolNotifier) {
+    private static class VerifyResult {
+        final String summary;
+        final ItineraryPlan correctedPlan;
+
+        VerifyResult(String summary, ItineraryPlan correctedPlan) {
+            this.summary = summary;
+            this.correctedPlan = correctedPlan;
+        }
+    }
+
+    private VerifyResult runVerifyPhase(List<Map<String, Object>> messages,
+            java.util.function.Consumer<String> toolNotifier, ItineraryPlan originalDraft) {
         int retryCount = 0;
         int maxVerifyRetries = 2;
         String lastResult = "审核完成";
+        ItineraryPlan currentPlan = originalDraft;
         while (retryCount < maxVerifyRetries) {
             try {
                 JsonNode response = callLlmChat(messages, null);
-                String content = response.path("choices").get(0)
-                        .path("message").path("content").asText("");
+                JsonNode choices = response.path("choices");
+                if (!choices.isArray() || choices.isEmpty()) {
+                    return new VerifyResult("审核异常", originalDraft);
+                }
+                String content = choices.get(0).path("message").path("content").asText("");
 
                 if (toolNotifier != null && !content.isBlank()) {
                     String thought = extractThought(content);
@@ -667,15 +895,28 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     toolNotifier.accept("THOUGHT:" + thought);
                 }
 
+                // If LLM was asked to correct, try parse corrected plan from final_output
+                if (retryCount > 0 && content.contains("final_output")) {
+                    try {
+                        ItineraryPlan corrected = parseItinerary(content);
+                        if (corrected != null && corrected.getDailyPlans() != null
+                                && !corrected.getDailyPlans().isEmpty()) {
+                            currentPlan = corrected;
+                        }
+                    } catch (Exception ex) {
+                    }
+                }
+
                 try {
                     JsonNode verifyJson = objectMapper.readTree(extractFirstJsonObject(content));
                     String status = verifyJson.path("status").asText("PASS");
                     if ("PASS".equals(status)) {
-                        return "审核通过：" + verifyJson.path("summary").asText("行程质量合格");
+                        return new VerifyResult(
+                            "审核通过：" + verifyJson.path("summary").asText("行程质量合格"),
+                            currentPlan);
                     }
                     lastResult = "审核不通过，发现" + verifyJson.path("issues").size() + "个问题";
 
-                    // Self-correction: feed issues back to LLM
                     if (retryCount < maxVerifyRetries - 1) {
                         if (toolNotifier != null) {
                             toolNotifier.accept("THOUGHT:质量审核发现问题（第" + (retryCount + 1) + "次），将建议告知LLM要求修正...");
@@ -687,9 +928,11 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                         retryCount++;
                         continue;
                     }
-                    return lastResult + "（已自动反馈两次修正仍存在问题，请手动检查）";
+                    return new VerifyResult(
+                        lastResult + "（已自动反馈两次修正仍存在问题，请手动检查）",
+                        currentPlan);
                 } catch (Exception e) {
-                    return "审核完成，行程已生成";
+                    return new VerifyResult("审核完成，行程已生成", currentPlan);
                 }
             } catch (Exception e) {
                 if (retryCount < maxVerifyRetries - 1) {
@@ -697,10 +940,20 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     try { Thread.sleep(1000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                     continue;
                 }
-                return "审核过程异常，行程已生成";
+                return new VerifyResult("审核过程异常，行程已生成", currentPlan);
             }
         }
-        return lastResult;
+
+        // After correction retries, try to parse corrected plan from the last response
+        if (retryCount > 0 && messages.size() >= 2) {
+            Map<String, Object> lastUserMsg = messages.get(messages.size() - 1);
+            String lastContent = (String) lastUserMsg.getOrDefault("content", "");
+            if (lastContent.contains("审核发现以下问题")) {
+                // The LLM should have responded to this in the previous iteration's call
+                // The corrected plan is gone since we don't store it, return original
+            }
+        }
+        return new VerifyResult(lastResult, currentPlan);
     }
 
     private String extractFirstJsonObject(String text) {
@@ -809,6 +1062,13 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
         jsonToParse = fixJsonIssues(jsonToParse);
 
+        // Try to repair truncated JSON (LLM output hit token limit)
+        String repaired = repairTruncatedJson(jsonToParse);
+        if (!repaired.equals(jsonToParse)) {
+            System.out.println("Repaired truncated itinerary JSON");
+            jsonToParse = repaired;
+        }
+
         try {
             JsonNode root = objectMapper.readTree(jsonToParse);
             ItineraryPlan plan = objectMapper.treeToValue(root, ItineraryPlan.class);
@@ -848,6 +1108,99 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         int end = content.indexOf("/final_output", jsonStart);
         if (end < 0) return content.substring(jsonStart);
         return content.substring(jsonStart, end).trim();
+    }
+
+    private String repairTruncatedJson(String json) {
+        if (json == null || json.isBlank() || "{}".equals(json.trim())) return json;
+        json = json.trim();
+
+        try {
+            objectMapper.readTree(json);
+            return json;
+        } catch (Exception ignored) {
+        }
+
+        // Strategy 1: simple bracket repair
+        String bracketRepaired = tryBracketRepair(json);
+        if (bracketRepaired != null) return bracketRepaired;
+
+        // Strategy 2: strip incomplete trailing value, then bracket repair
+        String stripped = stripIncompleteValue(json);
+        String strippedRepaired = tryBracketRepair(stripped);
+        if (strippedRepaired != null) return strippedRepaired;
+
+        return json;
+    }
+
+    private String tryBracketRepair(String json) {
+        int braceOpen = 0;
+        int bracketOpen = 0;
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (escaped) { escaped = false; continue; }
+            if (c == '\\' && inString) { escaped = true; continue; }
+            if (c == '"') { inString = !inString; continue; }
+            if (inString) continue;
+            if (c == '{') braceOpen++;
+            else if (c == '}') braceOpen = Math.max(0, braceOpen - 1);
+            else if (c == '[') bracketOpen++;
+            else if (c == ']') bracketOpen = Math.max(0, bracketOpen - 1);
+        }
+
+        if (braceOpen == 0 && bracketOpen == 0) return null;
+
+        StringBuilder sb = new StringBuilder(json);
+        for (int i = 0; i < bracketOpen; i++) sb.append(']');
+        for (int i = 0; i < braceOpen; i++) sb.append('}');
+
+        String repaired = sb.toString();
+        try {
+            objectMapper.readTree(repaired);
+            return repaired;
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private String stripIncompleteValue(String json) {
+        int stripPoint = json.length();
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int i = json.length() - 1; i >= 0; i--) {
+            char c = json.charAt(i);
+            if (inString) {
+                if (c == '\\' && i > 0) {
+                    boolean prevEscaped = false;
+                    int bsCount = 0;
+                    for (int j = i; j >= 0 && json.charAt(j) == '\\'; j--) bsCount++;
+                    escaped = (bsCount % 2 == 1);
+                    if (escaped) continue;
+                }
+                if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') { inString = true; continue; }
+            if (c == ',' || c == ':' || c == '{' || c == '[') {
+                stripPoint = c == ',' || c == ':' ? i : i + 1;
+                break;
+            }
+        }
+
+        if (stripPoint >= json.length()) return json;
+
+        String stripped = json.substring(0, stripPoint);
+
+        if (stripped.endsWith(",")) {
+            stripped = stripped.substring(0, stripped.length() - 1);
+        } else if (stripped.endsWith(":")) {
+            stripped = stripped.substring(0, stripped.length() - 1);
+        }
+
+        return stripped.trim();
     }
 
     private String fixJsonIssues(String json) {
@@ -919,6 +1272,10 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     }
 
     private JsonNode callLlmChat(List<Map<String, Object>> messages, JsonNode tools) {
+        return callLlmChat(messages, tools, null);
+    }
+
+    private JsonNode callLlmChat(List<Map<String, Object>> messages, JsonNode tools, Integer overrideMaxTokens) {
         ObjectNode body = objectMapper.createObjectNode();
         body.put("model", llmModel);
         body.put("temperature", llmTemperature);
@@ -926,6 +1283,12 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
         if (tools != null && !tools.isEmpty()) {
             body.set("tools", tools);
+        }
+
+        if (overrideMaxTokens != null) {
+            body.put("max_tokens", overrideMaxTokens);
+        } else if (tools != null && !tools.isEmpty()) {
+            body.put("max_tokens", 8192);
         }
 
         String jsonBody;

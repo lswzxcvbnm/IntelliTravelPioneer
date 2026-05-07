@@ -16,6 +16,15 @@ public interface ItineraryService {
         return generateItinerary(token, request);
     }
 
+    ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
+            ItineraryPlan currentPlan, String userPrompt);
+
+    default ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
+            ItineraryPlan currentPlan, String userPrompt,
+            java.util.function.Consumer<String> toolNotifier) {
+        return modifyItinerary(token, request, currentPlan, userPrompt);
+    }
+
     String saveItinerary(String token, ItinerarySaveRequest request);
 
     void updateItinerary(String token, String itineraryId, ItinerarySaveRequest request);

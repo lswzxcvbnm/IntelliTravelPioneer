@@ -28,6 +28,12 @@ service.interceptors.request.use(
 service.interceptors.response.use(
     response => {
         if (response.status === 200) {
+            const data = response.data as any;
+            if (data && data.success === false) {
+                const bizError = new Error(data.message || data.msg || '请求失败');
+                (bizError as any).response = response;
+                return Promise.reject(bizError);
+            }
             return response;
         } else {
             return Promise.reject(new Error(`HTTP ${response.status}`));

@@ -39,14 +39,33 @@ public class ItineraryController {
     public SseEmitter generateItineraryStream(
             @RequestHeader("token") String token,
             @RequestBody ItineraryRequest request) {
-        SseEmitter emitter = new SseEmitter(300000L);
+        SseEmitter emitter = new SseEmitter(600000L);
+        final java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean(false);
 
         emitter.onTimeout(() -> {
-            emitter.complete();
+            if (completed.compareAndSet(false, true)) {
+                try {
+                    emitter.send(SseEmitter.event().name("error")
+                            .data("AI 规划耗时过长，已超时。请尝试减少天数或简化需求。"));
+                } catch (Exception ignored) {
+                }
+                emitter.complete();
+                System.out.println("====== SSE timeout, connection closed ======");
+            }
+        });
+
+        emitter.onError(e -> {
+            System.err.println("====== SSE Connection Error ======");
+            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace();
+            System.err.println("==================================");
         });
 
         CompletableFuture.runAsync(() -> {
             try {
+                System.out.println("====== Starting generateItinerary SSE ======");
+                System.out.println("Request: destination=" + request.getDestination() + ", days=" + request.getDays());
+                
                 ItineraryPlan plan = itineraryService.generateItinerary(token, request, message -> {
                     try {
                         if (message.startsWith("PHASE:")) {
@@ -70,17 +89,133 @@ public class ItineraryController {
                                     .data(message));
                         }
                     } catch (Exception e) {
+                        System.err.println("Error sending SSE event: " + e.getMessage());
                     }
                 });
+                
+                System.out.println("====== generateItinerary completed, sending result ======");
+                String planJson = objectMapper.writeValueAsString(plan);
+                System.out.println("Result JSON length: " + planJson.length());
                 emitter.send(SseEmitter.event()
                         .name("result")
-                        .data(plan));
-                emitter.complete();
+                        .data(planJson));
+                
+                if (completed.compareAndSet(false, true)) {
+                    emitter.complete();
+                    System.out.println("====== SSE completed successfully ======");
+                }
             } catch (Exception e) {
+                System.err.println("====== SSE stream error in generateItinerary ======");
+                System.err.println("Exception type: " + e.getClass().getName());
+                System.err.println("Exception message: " + e.getMessage());
+                e.printStackTrace();
+                System.err.println("==================================================");
+                if (completed.compareAndSet(false, true)) {
+                    try {
+                        String errorMsg = e.getMessage();
+                        if (errorMsg == null || errorMsg.isBlank()) {
+                            errorMsg = "AI 规划过程中发生未知错误，请重试";
+                        }
+                        emitter.send(SseEmitter.event().name("error").data(errorMsg));
+                    } catch (Exception ex) {
+                        System.err.println("Failed to send error event: " + ex.getMessage());
+                    }
+                    emitter.complete();
+                }
+            }
+        });
+        return emitter;
+    }
+
+    @PostMapping(value = "/modify/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter modifyItineraryStream(
+            @RequestHeader("token") String token,
+            @RequestBody Map<String, Object> body) {
+        SseEmitter emitter = new SseEmitter(600000L);
+        final java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+        emitter.onTimeout(() -> {
+            if (completed.compareAndSet(false, true)) {
                 try {
-                    emitter.send(SseEmitter.event().name("error").data(e.getMessage()));
-                    emitter.completeWithError(e);
-                } catch (Exception ex) {
+                    emitter.send(SseEmitter.event().name("error")
+                            .data("AI 修改耗时过长，已超时。请重试。"));
+                } catch (Exception ignored) {
+                }
+                emitter.complete();
+                System.out.println("====== SSE timeout (modify), connection closed ======");
+            }
+        });
+
+        emitter.onError(e -> {
+            System.err.println("====== SSE Connection Error (modify) ======");
+            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace();
+            System.err.println("==========================================");
+        });
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                System.out.println("====== Starting modifyItinerary SSE ======");
+                
+                ItineraryRequest request = objectMapper.convertValue(
+                        body.get("request"), ItineraryRequest.class);
+                ItineraryPlan currentPlan = objectMapper.convertValue(
+                        body.get("currentPlan"), ItineraryPlan.class);
+                String userPrompt = (String) body.get("userPrompt");
+
+                ItineraryPlan plan = itineraryService.modifyItinerary(token, request,
+                        currentPlan, userPrompt, message -> {
+                    try {
+                        if (message.startsWith("PHASE:")) {
+                            String phaseBody = message.substring(6);
+                            int colonIdx = phaseBody.indexOf(":");
+                            if (colonIdx > 0) {
+                                emitter.send(SseEmitter.event()
+                                        .name("phase")
+                                        .data(objectMapper.writeValueAsString(Map.of(
+                                            "type", phaseBody.substring(0, colonIdx),
+                                            "message", phaseBody.substring(colonIdx + 1)))));
+                            }
+                        } else if (message.startsWith("THOUGHT:")) {
+                            emitter.send(SseEmitter.event()
+                                    .name("thought")
+                                    .data(message.substring(8)));
+                        } else {
+                            emitter.send(SseEmitter.event()
+                                    .name("tool")
+                                    .data(message));
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Error sending SSE event (modify): " + e.getMessage());
+                    }
+                });
+                
+                System.out.println("====== modifyItinerary completed, sending result ======");
+                String planJson = objectMapper.writeValueAsString(plan);
+                System.out.println("Result JSON length: " + planJson.length());
+                emitter.send(SseEmitter.event().name("result").data(planJson));
+                
+                if (completed.compareAndSet(false, true)) {
+                    emitter.complete();
+                    System.out.println("====== SSE modify completed successfully ======");
+                }
+            } catch (Exception e) {
+                System.err.println("====== SSE stream error in modifyItinerary ======");
+                System.err.println("Exception type: " + e.getClass().getName());
+                System.err.println("Exception message: " + e.getMessage());
+                e.printStackTrace();
+                System.err.println("=================================================");
+                if (completed.compareAndSet(false, true)) {
+                    try {
+                        String errorMsg = e.getMessage();
+                        if (errorMsg == null || errorMsg.isBlank()) {
+                            errorMsg = "AI 修改过程中发生未知错误，请重试";
+                        }
+                        emitter.send(SseEmitter.event().name("error").data(errorMsg));
+                    } catch (Exception ex) {
+                        System.err.println("Failed to send error event: " + ex.getMessage());
+                    }
+                    emitter.complete();
                 }
             }
         });

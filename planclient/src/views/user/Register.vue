@@ -127,14 +127,11 @@ const handleRegister = async () => {
       }
     }, 800)
   } catch (err: any) {
-    const backendMsg = err?.response?.data?.msg || err?.response?.data?.message
-    if (backendMsg) {
-      errorMessage.value = backendMsg
-    } else if (err?.message?.includes('User already exists')) {
-      errorMessage.value = '该用户名已被注册'
-    } else {
-      errorMessage.value = err?.message || '注册失败，请稍后重试'
-    }
+    const msg = err?.response?.data?.msg
+      || err?.response?.data?.message
+      || err?.message
+      || '注册失败，请稍后重试'
+    errorMessage.value = msg
     isSubmitting.value = false
     successMessage.value = ''
   }
