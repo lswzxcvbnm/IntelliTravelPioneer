@@ -208,7 +208,7 @@
       </div>
     </aside>
 
-    <aside class="agent-panel agent-panel-idle" v-else-if="step === 1 && !isLoadingGenerate">
+    <aside class="agent-panel agent-panel-idle" v-else-if="step === 1">
       <div class="agent-panel-header">
         <span class="agent-panel-icon">🤖</span>
         <span>Agent 面板</span>
@@ -217,6 +217,90 @@
       <div class="agent-panel-idle-content">
         <div class="idle-icon">✨</div>
         <p>填写左侧表单后点击<br /><strong>"生成 AI 方案"</strong><br />Agent 将在这里展示<br />实时规划与思考过程</p>
+      </div>
+    </aside>
+
+    <aside class="agent-panel agent-panel-idle" v-else-if="step >= 2 && !isRefining">
+      <div class="agent-panel-header">
+        <span class="agent-panel-icon">🤖</span>
+        <span>Agent 面板</span>
+        <span class="agent-panel-badge done">已完成</span>
+      </div>
+      <div class="agent-log-stream readonly">
+        <div class="agent-summary-card">
+          <div class="summary-title">📋 最近一次 {{ isRefining ? '修改' : '生成' }}摘要</div>
+          <div class="summary-stats">
+            <div class="summary-stat">
+              <span class="summary-stat-label">模型</span>
+              <span class="summary-stat-value">GLM-5 / Qwen3-8B</span>
+            </div>
+            <div class="summary-stat">
+              <span class="summary-stat-label">行程天数</span>
+              <span class="summary-stat-value">{{ editablePlan?.totalDays || '-' }} 天</span>
+            </div>
+            <div class="summary-stat">
+              <span class="summary-stat-label">路线项</span>
+              <span class="summary-stat-value">{{ routeItemCount }} 个</span>
+            </div>
+            <div class="summary-stat">
+              <span class="summary-stat-label">预算</span>
+              <span class="summary-stat-value">{{ formatCurrency(editablePlan?.estimatedCost || 0) }}</span>
+            </div>
+          </div>
+
+          <div class="summary-section" v-if="activeStats">
+            <div class="summary-section-title">📊 Token 消耗</div>
+            <div class="summary-stats">
+              <div class="summary-stat">
+                <span class="summary-stat-label">总计 Token</span>
+                <span class="summary-stat-value">{{ activeStats.totalTokens.toLocaleString() }}</span>
+              </div>
+              <div class="summary-stat">
+                <span class="summary-stat-label">提示词 Token</span>
+                <span class="summary-stat-value">{{ activeStats.totalPromptTokens.toLocaleString() }}</span>
+              </div>
+              <div class="summary-stat">
+                <span class="summary-stat-label">生成 Token</span>
+                <span class="summary-stat-value">{{ activeStats.totalCompletionTokens.toLocaleString() }}</span>
+              </div>
+              <div class="summary-stat">
+                <span class="summary-stat-label">API 调用</span>
+                <span class="summary-stat-value">{{ activeStats.planCalls + activeStats.executeCalls + activeStats.verifyCalls }} 次</span>
+              </div>
+            </div>
+
+            <div class="summary-section" v-if="activeStats.toolCalls && activeStats.toolCalls.length > 0">
+              <div class="summary-section-title">🔧 工具调用明细（{{ activeStats.toolCalls.length }} 次）</div>
+              <div class="tool-call-list">
+                <div class="tool-call-item" v-for="(tc, idx) in activeStats.toolCalls" :key="idx">
+                  <span class="tool-call-status" :class="tc.status === 'success' ? 'status-ok' : 'status-fail'">
+                    {{ tc.status === 'success' ? '✓' : '✗' }}
+                  </span>
+                  <span class="tool-call-name">{{ tc.displayName }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="summary-section" v-if="generatingLogs.length > 0">
+            <div class="summary-section-title">生成过程回顾</div>
+            <div v-for="(entry, idx) in generatingLogs" :key="'g'+idx" class="log-row mini">
+              <div v-if="entry.type === 'phase'" class="phase-banner" :class="{ 'phase-done': entry.phaseType?.endsWith('_END') }">
+                <span class="phase-icon">{{ entry.phaseType?.endsWith('_END') ? '✓' : '▶' }}</span>
+                <span class="phase-msg">{{ entry.message }}</span>
+              </div>
+              <div v-else-if="entry.type === 'thought'" class="thought-bubble">
+                <span class="thought-icon">💭</span>
+                <span class="thought-text">{{ entry.message }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="summary-section" v-else>
+            <div class="summary-section-title">生成过程回顾</div>
+            <p class="summary-empty">暂无日志（行程可能来自加载或手动创建）。</p>
+          </div>
+        </div>
       </div>
     </aside>
   </div>
@@ -228,11 +312,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import {
   generateItineraryStream,
+  modifyItineraryStream,
   getItineraryDetail,
   saveItinerary,
   updateItinerary
 } from '../../api/itinerary'
-import type { ItineraryPlan, ItineraryRequest, PhaseData } from '../../api/itinerary'
+import type { ItineraryPlan, ItineraryRequest, PhaseData, GenerationStats, ToolCallRecord } from '../../api/itinerary'
 import { goBackByAppRule } from '../../composables/useBackHandler'
 
 const router = useRouter()
@@ -260,6 +345,9 @@ const refinePrompt = ref('')
 const isRefining = ref(false)
 const refineLogs = ref<LogEntry[]>([])
 const refineCurrentPhase = ref('')
+const generationStats = ref<GenerationStats | null>(null)
+const refineStats = ref<GenerationStats | null>(null)
+const loadedStats = ref<GenerationStats | null>(null)
 
 const itineraryId = computed(() => String(route.query.itineraryId || ''))
 const isEditMode = computed(() => itineraryId.value.length > 0)
@@ -274,6 +362,13 @@ const activeAgentLogs = computed(() => {
   if (isLoadingGenerate.value) return generatingLogs.value
   if (isRefining.value) return refineLogs.value
   return []
+})
+
+const activeStats = computed(() => {
+  if (generationStats.value) return generationStats.value
+  if (refineStats.value) return refineStats.value
+  if (loadedStats.value) return loadedStats.value
+  return null
 })
 
 watch(activeAgentLogs, async () => {
@@ -369,10 +464,96 @@ const normalizePlan = (plan: ItineraryPlan): ItineraryPlan => ({
   }))
 })
 
+const mergeRefinedPlan = (original: ItineraryPlan, refined: ItineraryPlan): ItineraryPlan => {
+  // LLM's totalDays is the authoritative intent signal:
+  //   reduced   → AI decided user wants to delete an entire day
+  //   increased → AI decided user wants to add days
+  //   unchanged → AI decided user only wants item-level changes
+  const aiDecidedDayDeletion = refined.totalDays < original.totalDays
+  const aiDecidedDayAddition = refined.totalDays > original.totalDays
+
+  // Build a set of item names that exist in the refined plan
+  const refinedItemNames = new Set<string>()
+  for (const day of refined.dailyPlans) {
+    for (const item of day.items) {
+      if (item.name) refinedItemNames.add(item.name)
+    }
+  }
+
+  // Start with the original days, removing only items the LLM deleted
+  const resultDays = original.dailyPlans.map(origDay => ({
+    dayNumber: origDay.dayNumber,
+    items: origDay.items.filter(origItem => {
+      if (!origItem.name) return true
+      return refinedItemNames.has(origItem.name)
+    })
+  }))
+
+  // Apply new/modified items from the refined plan
+  for (const refinedDay of refined.dailyPlans) {
+    if (refinedDay.dayNumber == null || refinedDay.dayNumber <= 0) continue
+
+    if (aiDecidedDayAddition && refinedDay.dayNumber > original.totalDays) {
+      // Brand new day that didn't exist in the original
+      resultDays.push({
+        dayNumber: refinedDay.dayNumber,
+        items: refinedDay.items.map(item => ({
+          type: normalizeRouteType(item.type),
+          name: item.name || '未命名路线项',
+          description: item.description || '暂无描述',
+          location: item.location || { lat: 0, lng: 0, name: '' }
+        }))
+      })
+      continue
+    }
+
+    const existingDay = resultDays.find(d => d.dayNumber === refinedDay.dayNumber)
+    if (existingDay) {
+      const existingNames = new Set(existingDay.items.map(i => i.name))
+      for (const refinedItem of refinedDay.items) {
+        if (refinedItem.name && !existingNames.has(refinedItem.name)) {
+          existingDay.items.push({
+            type: normalizeRouteType(refinedItem.type),
+            name: refinedItem.name,
+            description: refinedItem.description || '暂无描述',
+            location: refinedItem.location || { lat: 0, lng: 0, name: '' }
+          })
+        }
+      }
+    }
+  }
+
+  let finalDays: typeof resultDays
+  if (aiDecidedDayDeletion) {
+    // AI decided to delete a day — trust it
+    const llmDayNumbers = new Set(refined.dailyPlans.map(d => d.dayNumber))
+    finalDays = resultDays.filter(d => llmDayNumbers.has(d.dayNumber))
+    finalDays = finalDays.map((d, i) => ({ ...d, dayNumber: i + 1 }))
+  } else if (aiDecidedDayAddition) {
+    // AI decided to add days — keep all, renumber
+    finalDays = resultDays
+      .filter(d => d.items.length > 0)
+      .map((d, i) => ({ ...d, dayNumber: i + 1 }))
+  } else {
+    // Item-level changes: remove days that became empty from item deletion
+    finalDays = resultDays
+      .filter(d => d.items.length > 0)
+      .map((d, i) => ({ ...d, dayNumber: i + 1 }))
+  }
+
+  return {
+    title: refined.title || original.title,
+    estimatedCost: refined.estimatedCost || original.estimatedCost,
+    totalDays: finalDays.length,
+    dailyPlans: finalDays.length > 0 ? finalDays : original.dailyPlans
+  }
+}
+
 const handleGenerate = async () => {
   errorMessage.value = ''
   generatingLogs.value = []
   currentPhase.value = ''
+  generationStats.value = null
   const ve = validateRequest(); if (ve) { errorMessage.value = ve; return }
   isLoadingGenerate.value = true
   try {
@@ -382,25 +563,32 @@ const handleGenerate = async () => {
       (msg: string) => { generatingLogs.value.push({ type: 'thought', message: msg }) },
       (msg: string) => { generatingLogs.value.push({ type: 'tool', message: getLogMessage(msg) }) },
       (plan) => { editablePlan.value = normalizePlan(plan); step.value = 2; isLoadingGenerate.value = false },
-      (error) => { errorMessage.value = error.message || '生成报错，请稍后重试。'; isLoadingGenerate.value = false }
+      (error) => { errorMessage.value = error.message || '生成报错，请稍后重试。'; isLoadingGenerate.value = false },
+      (stats) => { generationStats.value = stats }
     )
   } catch (error: any) { errorMessage.value = '生成失败，请稍后重试。'; isLoadingGenerate.value = false }
 }
 
 const handleAiRefine = async () => {
   if (!refinePrompt.value.trim() || !editablePlan.value) return
-  isRefining.value = true; refineLogs.value = []; refineCurrentPhase.value = ''
-  const refineRequest: ItineraryRequest = {
-    ...request,
-    additionalNotes: `【注意事项：用户需要修改这份已有计划】\n当前已有计划：\n${JSON.stringify(editablePlan.value)}\n\n用户修改建议：\n${refinePrompt.value}`
-  }
+  isRefining.value = true; refineLogs.value = []; refineCurrentPhase.value = ''; refineStats.value = null
+  const originalPlan = { ...editablePlan.value }
+
   try {
-    await generateItineraryStream(refineRequest,
+    await modifyItineraryStream(
+      { ...request },
+      { ...editablePlan.value },
+      refinePrompt.value,
       (phase: PhaseData) => { refineLogs.value.push({ type: 'phase', message: phase.message, phaseType: phase.type }); refineCurrentPhase.value = phase.type },
       (msg: string) => { refineLogs.value.push({ type: 'thought', message: msg }) },
-      (msg) => { refineLogs.value.push({ type: 'tool', message: getLogMessage(msg) }) },
-      (plan) => { editablePlan.value = normalizePlan(plan); isRefining.value = false; refinePrompt.value = '' },
-      (error) => { ElMessageBox.alert(error.message || '修改报错', 'AI修改失败', { type: 'error' }); isRefining.value = false }
+      (msg: string) => { refineLogs.value.push({ type: 'tool', message: getLogMessage(msg) }) },
+      (plan: ItineraryPlan) => {
+        editablePlan.value = mergeRefinedPlan(originalPlan, normalizePlan(plan))
+        isRefining.value = false
+        refinePrompt.value = ''
+      },
+      (error: any) => { ElMessageBox.alert(error.message || '修改报错', 'AI修改失败', { type: 'error' }); isRefining.value = false },
+      (stats: GenerationStats) => { refineStats.value = stats }
     )
   } catch (error: any) { ElMessageBox.alert(error.message || '修改失败', 'AI修改失败', { type: 'error' }); isRefining.value = false }
 }
@@ -458,6 +646,7 @@ const loadDetailForEdit = async () => {
   try {
     const r = await getItineraryDetail(itineraryId.value)
     editablePlan.value = normalizePlan(r.data.data.plan)
+    loadedStats.value = r.data.data.stats || null
     savedItineraryId.value = r.data.data.id; step.value = 2
   } catch { errorMessage.value = '加载已有计划失败。' } finally { isLoadingGenerate.value = false }
 }
@@ -473,12 +662,13 @@ const savePlan = async () => {
   errorMessage.value = ''; const ve = validatePlan(); if (ve) { errorMessage.value = ve; return }
   if (!editablePlan.value) return
   isSaving.value = true
+  const stats = generationStats.value || refineStats.value || loadedStats.value || undefined
   try {
     if (isEditMode.value) {
-      await updateItinerary(itineraryId.value, { ...editablePlan.value, destination: request.destination.trim() })
+      await updateItinerary(itineraryId.value, { ...editablePlan.value, destination: request.destination.trim(), stats })
       savedItineraryId.value = itineraryId.value; step.value = 3
     } else {
-      const r = await saveItinerary({ ...editablePlan.value, destination: request.destination.trim(), dailyPlans: editablePlan.value.dailyPlans })
+      const r = await saveItinerary({ ...editablePlan.value, destination: request.destination.trim(), dailyPlans: editablePlan.value.dailyPlans, stats })
       savedItineraryId.value = r.data.data; step.value = 3
     }
   } catch { errorMessage.value = '保存失败，请稍后重试。' } finally { isSaving.value = false }
@@ -1137,6 +1327,87 @@ textarea {
   color: #6B8CBE;
 }
 
+.agent-panel-badge.done {
+  background: #DBEAFE;
+  color: #1E40AF;
+}
+
+.agent-log-stream.readonly {
+  overflow-y: auto;
+}
+
+.agent-summary-card {
+  padding: 4px 0;
+}
+
+.summary-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1E3A5F;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(51, 133, 255, 0.08);
+}
+
+.summary-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.summary-stat {
+  background: #FAFCFF;
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid rgba(51, 133, 255, 0.06);
+}
+
+.summary-stat-label {
+  display: block;
+  font-size: 11px;
+  color: #94A3B8;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.summary-stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1E3A5F;
+}
+
+.summary-section {
+  margin-top: 16px;
+}
+
+.summary-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6B8CBE;
+  margin-bottom: 10px;
+}
+
+.summary-empty {
+  font-size: 13px;
+  color: #94A3B8;
+  margin: 0;
+}
+
+.log-row.mini .phase-banner {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.log-row.mini .thought-bubble {
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+.log-row.mini .thought-text {
+  font-size: 12px;
+}
+
 @keyframes badge-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
@@ -1342,5 +1613,41 @@ textarea {
 
 .agent-panel-idle-content strong {
   color: #3385FF;
+}
+
+.tool-call-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-call-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #FAFCFF;
+  border-radius: 8px;
+  border: 1px solid rgba(51, 133, 255, 0.06);
+  font-size: 12px;
+}
+
+.tool-call-status {
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.tool-call-status.status-ok {
+  color: #10b981;
+}
+
+.tool-call-status.status-fail {
+  color: #ef4444;
+}
+
+.tool-call-name {
+  color: #1E3A5F;
+  font-weight: 500;
 }
 </style>

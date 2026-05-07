@@ -1,4 +1,5 @@
 package com.travel.intellitravel_pioneer.vo.itinerary;
+import com.travel.intellitravel_pioneer.vo.trip.GenerationStats;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -18,6 +19,7 @@ public class ItineraryVO {
     private String title;
     private String destination;
     private ItineraryPlan plan;
+    private GenerationStats stats;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

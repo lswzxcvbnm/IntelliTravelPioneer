@@ -10,6 +10,7 @@ import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryPlan;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryRequest;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItinerarySaveRequest;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryVO;
+import com.travel.intellitravel_pioneer.vo.trip.GenerationResult;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -30,12 +31,37 @@ public class ItineraryServiceImpl implements ItineraryService {
     private TokenUtil tokenUtil;
 
     @Override
-    public ItineraryPlan generateItinerary(String token, ItineraryRequest request) {
-        return generateItinerary(token, request, null);
+    public ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
+            ItineraryPlan currentPlan, String userPrompt) {
+        GenerationResult result = modifyItineraryWithStats(token, request, currentPlan, userPrompt, null);
+        return result != null ? result.getPlan() : null;
     }
 
     @Override
-    public ItineraryPlan generateItinerary(String token, ItineraryRequest request,
+    public GenerationResult modifyItineraryWithStats(String token, ItineraryRequest request,
+            ItineraryPlan currentPlan, String userPrompt,
+            java.util.function.Consumer<String> toolNotifier) {
+        if (token == null || token.isBlank()) {
+            throw new IntellitravelException("token is required");
+        }
+        if (request == null || currentPlan == null) {
+            throw new IntellitravelException("request and currentPlan are required");
+        }
+        try {
+            return tripPlanningAiClient.modifyItineraryWithStats(token, request, currentPlan, userPrompt, toolNotifier);
+        } catch (Exception e) {
+            throw new IntellitravelException("Failed to modify itinerary: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public ItineraryPlan generateItinerary(String token, ItineraryRequest request) {
+        GenerationResult result = generateItineraryWithStats(token, request, null);
+        return result != null ? result.getPlan() : null;
+    }
+
+    @Override
+    public GenerationResult generateItineraryWithStats(String token, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier) {
         if (token == null || token.isBlank()) {
             throw new IntellitravelException("token is required");
@@ -45,7 +71,7 @@ public class ItineraryServiceImpl implements ItineraryService {
         }
 
         try {
-            return tripPlanningAiClient.generateItinerary(token, request, toolNotifier);
+            return tripPlanningAiClient.generateItineraryWithStats(token, request, toolNotifier);
         } catch (Exception e) {
             throw new IntellitravelException("Failed to generate itinerary: " + e.getMessage());
         }
@@ -75,6 +101,7 @@ public class ItineraryServiceImpl implements ItineraryService {
                 .userId(userId)
                 .title(request.getTitle())
                 .plan(plan)
+                .stats(request.getStats())
                 .createTime(LocalDateTime.now())
                 .updateTime(LocalDateTime.now())
                 .build();
@@ -113,6 +140,9 @@ public class ItineraryServiceImpl implements ItineraryService {
 
         existingItinerary.setTitle(request.getTitle());
         existingItinerary.setPlan(plan);
+        if (request.getStats() != null) {
+            existingItinerary.setStats(request.getStats());
+        }
         existingItinerary.setUpdateTime(LocalDateTime.now());
         itineraryRepository.save(existingItinerary);
     }
@@ -126,14 +156,8 @@ public class ItineraryServiceImpl implements ItineraryService {
             throw new IntellitravelException("itineraryId is required");
         }
 
-        // String userId = String.valueOf(tokenUtil.getUser(token).getId());
         ItineraryPO itinerary = itineraryRepository.findById(itineraryId)
                 .orElseThrow(() -> new IntellitravelException("itinerary not found"));
-
-        // if (!itinerary.getUserId().equals(userId)) {
-        // throw new IntellitravelException("access denied: itinerary does not belong to
-        // user");
-        // }
 
         return ItineraryVO.builder()
                 .id(itinerary.getId())
@@ -141,6 +165,7 @@ public class ItineraryServiceImpl implements ItineraryService {
                 .title(itinerary.getTitle())
                 .destination(itinerary.getPlan() == null ? null : itinerary.getPlan().getDestination())
                 .plan(itinerary.getPlan())
+                .stats(itinerary.getStats())
                 .createTime(itinerary.getCreateTime())
                 .updateTime(itinerary.getUpdateTime())
                 .build();

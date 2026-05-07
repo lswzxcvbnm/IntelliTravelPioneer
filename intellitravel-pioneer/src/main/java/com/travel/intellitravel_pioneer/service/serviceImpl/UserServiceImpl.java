@@ -1,23 +1,28 @@
 package com.travel.intellitravel_pioneer.service.serviceImpl;
 
+import at.favre.lib.crypto.bcrypt.BCrypt;
 import com.travel.intellitravel_pioneer.exception.IntellitravelException;
 import com.travel.intellitravel_pioneer.po.UserPO;
 import com.travel.intellitravel_pioneer.repository.UserRepository;
 import com.travel.intellitravel_pioneer.service.UserService;
-import com.travel.intellitravel_pioneer.vo.user.UserVO;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-
 import com.travel.intellitravel_pioneer.util.TokenUtil;
+import com.travel.intellitravel_pioneer.vo.user.UserVO;
+
+import org.springframework.stereotype.Service;
 
 @Service
 public class UserServiceImpl implements UserService {
 
-    @Autowired
-    private UserRepository userRepository;
+    private static final int BCRYPT_COST = 12;
 
-    @Autowired
-    private TokenUtil tokenUtil;
+    private final UserRepository userRepository;
+
+    private final TokenUtil tokenUtil;
+
+    public UserServiceImpl(UserRepository userRepository, TokenUtil tokenUtil) {
+        this.userRepository = userRepository;
+        this.tokenUtil = tokenUtil;
+    }
 
     @Override
     public String register(UserVO userVO, String password) {
@@ -25,7 +30,8 @@ public class UserServiceImpl implements UserService {
             throw IntellitravelException.userAlreadyExists();
         }
         UserPO userPO = userVO.toPO();
-        userPO.setPassword(password);
+        String hashed = BCrypt.withDefaults().hashToString(BCRYPT_COST, password.toCharArray());
+        userPO.setPassword(hashed);
         userRepository.save(userPO);
         return "Success";
     }
@@ -33,7 +39,11 @@ public class UserServiceImpl implements UserService {
     @Override
     public String login(String username, String password) {
         UserPO userPO = userRepository.findByUsername(username);
-        if (userPO == null || !userPO.getPassword().equals(password)) {
+        if (userPO == null) {
+            throw IntellitravelException.usernameOrPasswordError();
+        }
+        BCrypt.Result result = BCrypt.verifyer().verify(password.toCharArray(), userPO.getPassword());
+        if (!result.verified) {
             throw IntellitravelException.usernameOrPasswordError();
         }
         return tokenUtil.getToken(userPO);
@@ -54,12 +64,12 @@ public class UserServiceImpl implements UserService {
         if (userPO == null) {
             throw IntellitravelException.userNotFound();
         }
-        userPO.setName(userVO.getName());
-        userPO.setGrade(userVO.getGrade());
-        userPO.setAvatar(userVO.getAvatar());
-        userPO.setTelephone(userVO.getTelephone());
-        userPO.setEmail(userVO.getEmail());
-        userPO.setLocation(userVO.getLocation());
+        if (userVO.getName() != null) userPO.setName(userVO.getName());
+        if (userVO.getGrade() != null) userPO.setGrade(userVO.getGrade());
+        if (userVO.getAvatar() != null) userPO.setAvatar(userVO.getAvatar());
+        if (userVO.getTelephone() != null) userPO.setTelephone(userVO.getTelephone());
+        if (userVO.getEmail() != null) userPO.setEmail(userVO.getEmail());
+        if (userVO.getLocation() != null) userPO.setLocation(userVO.getLocation());
         userRepository.save(userPO);
         return "Success";
     }
@@ -76,12 +86,12 @@ public class UserServiceImpl implements UserService {
         }
         UserPO.LevelUpResult levelUpResult = userPO.addExperience(experience);
         userRepository.save(userPO);
-        
+
         UserVO userVO = userPO.toVO();
         if (levelUpResult != null && levelUpResult.isLevelUp()) {
             userVO.setLevelUpInfo(UserVO.LevelUpInfo.fromResult(levelUpResult));
         }
-        
+
         return userVO;
     }
 }
