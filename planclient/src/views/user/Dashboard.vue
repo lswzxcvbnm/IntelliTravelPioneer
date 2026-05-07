@@ -32,25 +32,34 @@
           <span class="section-hint">点击城市卡片，直接为该城市创建行程</span>
         </div>
 
-        <div class="dest-grid">
-          <div
-            v-for="(city, idx) in currentDestinations"
-            :key="city.name"
-            class="dest-card"
-            :class="`dest-card-${idx}`"
-            @click="handleProtectedNavigation({ path: '/battle/create', query: { destination: city.name } })"
-          >
-            <transition name="fade" mode="out-in">
-              <div :key="city.name" class="dest-image-wrapper">
-                <img v-if="city.img" :src="city.img" :alt="city.name" referrerpolicy="no-referrer" />
-                <div v-else class="dest-placeholder"></div>
+        <div class="dest-showcase">
+          <Transition name="carousel-fade" mode="out-in">
+            <div :key="rotationIndex" class="dest-grid">
+              <div
+                v-for="(city, idx) in currentDestinations"
+                :key="city.name"
+                class="dest-card"
+                :class="{ 'dest-card-hero': idx === 0 }"
+                :style="{ '--delay': `${idx * 0.07}s` }"
+                @click="handleProtectedNavigation({ path: '/battle/create', query: { destination: city.name } })"
+              >
+                <div class="dest-image-wrapper">
+                  <img
+                    v-if="city.img"
+                    :src="city.img"
+                    :alt="city.name"
+                    referrerpolicy="no-referrer"
+                    loading="lazy"
+                  />
+                  <div v-else class="dest-placeholder"></div>
+                  <div class="dest-glow"></div>
+                </div>
+                <div class="dest-overlay">
+                  <span class="dest-name">{{ city.name }}</span>
+                </div>
               </div>
-            </transition>
-            <div class="dest-overlay">
-              <span class="dest-name">{{ city.name }}</span>
-              <span class="dest-action">立即规划 →</span>
             </div>
-          </div>
+          </Transition>
         </div>
       </section>
     </div>
@@ -75,9 +84,11 @@ const allCities = [
   '桂林', '丽江', '大理', '苏州', '黄山', '张家界', '洛阳'
 ]
 
+const PAGE_SIZE = 7
 const displayDestinations = ref<{ name: string; img: string }[]>([])
 const currentDestinations = ref<{ name: string; img: string }[]>([])
 const rotationIndex = ref(0)
+const isTransitioning = ref(false)
 let rotationTimer: ReturnType<typeof setInterval> | null = null
 
 const checkCityImage = (name: string): Promise<string> => {
@@ -98,24 +109,26 @@ const checkCityImage = (name: string): Promise<string> => {
 
 const loadDestinations = async () => {
   const shuffled = [...allCities].sort(() => 0.5 - Math.random())
-  const names = shuffled.slice(0, 12)
+  const names = shuffled.slice(0, 14)
   const selected = await Promise.all(names.map(async (name) => ({
     name,
     img: await checkCityImage(name)
   })))
   displayDestinations.value = selected
-  currentDestinations.value = selected.slice(0, 6)
+  currentDestinations.value = selected.slice(0, PAGE_SIZE)
 }
 
 const rotateDestinations = () => {
-  if (displayDestinations.value.length < 12) return
-  rotationIndex.value = (rotationIndex.value + 1) % 6
-  currentDestinations.value = displayDestinations.value.slice(rotationIndex.value, rotationIndex.value + 6)
+  if (displayDestinations.value.length < PAGE_SIZE || isTransitioning.value) return
+  isTransitioning.value = true
+  rotationIndex.value = (rotationIndex.value + PAGE_SIZE) % displayDestinations.value.length
+  currentDestinations.value = displayDestinations.value.slice(rotationIndex.value, rotationIndex.value + PAGE_SIZE)
+  setTimeout(() => { isTransitioning.value = false }, 900)
 }
 
 onMounted(() => {
   setTimeout(() => { loadDestinations().catch(e => console.warn(e)) }, 100)
-  rotationTimer = setInterval(() => { rotateDestinations() }, 6000)
+  rotationTimer = setInterval(() => { rotateDestinations() }, 8000)
 })
 
 onUnmounted(() => {
@@ -142,7 +155,7 @@ const handleProtectedNavigation = async (target: string | Record<string, any>) =
 .dashboard-grid {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 36px;
 }
 
 .welcome-card {
@@ -188,11 +201,14 @@ const handleProtectedNavigation = async (target: string | Record<string, any>) =
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 4px 14px rgba(51, 133, 255, 0.3);
 }
 
-.action-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(51, 133, 255, 0.4); }
+.action-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(51, 133, 255, 0.4);
+}
 
 .action-btn-secondary {
   display: flex;
@@ -206,10 +222,10 @@ const handleProtectedNavigation = async (target: string | Record<string, any>) =
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.action-btn-secondary:hover { background: rgba(51, 133, 255, 0.05); }
+.action-btn-secondary:hover { background: rgba(51, 133, 255, 0.06); }
 
 .action-icon { font-size: 20px; }
 
@@ -217,13 +233,14 @@ const handleProtectedNavigation = async (target: string | Record<string, any>) =
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .section-header h2 {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   color: #1E3A5F;
+  letter-spacing: -0.02em;
 }
 
 .section-hint {
@@ -231,11 +248,15 @@ const handleProtectedNavigation = async (target: string | Record<string, any>) =
   color: #94A3B8;
 }
 
+.dest-showcase {
+  position: relative;
+}
+
 .dest-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr;
-  grid-template-rows: 200px 200px;
-  gap: 14px;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  grid-template-rows: repeat(2, 195px);
+  gap: 12px;
 }
 
 .dest-card {
@@ -243,68 +264,151 @@ const handleProtectedNavigation = async (target: string | Record<string, any>) =
   border-radius: 16px;
   overflow: hidden;
   cursor: pointer;
-  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 3px 12px rgba(51, 133, 255, 0.06);
+  animation: cardReveal 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: var(--delay, 0s);
+  opacity: 0;
+  transform: translateY(18px) scale(0.96);
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.dest-card:nth-child(1) { grid-row: span 2; }
+.dest-card-hero {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
 
-.dest-overlay {
+@keyframes cardReveal {
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.dest-image-wrapper {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.dest-glow {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, transparent 30%, rgba(0,0,0,0.55) 100%);
+  background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.12) 0%, transparent 60%);
+  pointer-events: none;
   z-index: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  padding: 18px 20px;
-  transition: all 0.3s;
+  opacity: 0;
+  transition: opacity 0.4s ease;
 }
 
-.dest-card:hover { transform: translateY(-4px); box-shadow: 0 8px 28px rgba(51, 133, 255, 0.15); }
-.dest-card:hover img { transform: scale(1.06); }
-.dest-card:hover .dest-action { opacity: 1; transform: translateY(0); }
-
-.dest-image-wrapper { width: 100%; height: 100%; }
+.dest-card:hover .dest-glow { opacity: 1; }
 
 .dest-card img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.5s ease;
+  object-position: center;
+  transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+              filter 0.4s ease;
+  animation: imageUnveil 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: calc(var(--delay, 0s) + 0.1s);
+  opacity: 0;
+  filter: brightness(1.03) saturate(1.08);
+}
+
+@keyframes imageUnveil {
+  from {
+    opacity: 0;
+    transform: scale(1.06);
+    filter: blur(4px) brightness(1.12) saturate(1.15);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0) brightness(1.03) saturate(1.08);
+  }
+}
+
+.dest-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 30%,
+    rgba(0,0,0,0.06) 55%,
+    rgba(0,0,0,0.48) 100%
+  );
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 16px 18px;
+  transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dest-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.25);
+  letter-spacing: -0.01em;
+}
+
+.dest-card-hero .dest-name {
+  font-size: 22px;
+}
+
+.dest-card:hover {
+  z-index: 10;
+  transform: translateY(-5px);
+  box-shadow:
+    0 16px 36px rgba(0,0,0,0.18),
+    0 0 0 1px rgba(255,255,255,0.08) inset;
+}
+
+.dest-card:hover img {
+  transform: scale(1.05);
+  filter: brightness(1) saturate(1.12);
+}
+
+.dest-card:hover .dest-overlay {
+  background: linear-gradient(
+    180deg,
+    transparent 35%,
+    rgba(0,0,0,0.06) 55%,
+    rgba(0,0,0,0.56) 100%
+  );
 }
 
 .dest-placeholder {
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, #EBF5FF 0%, #D6EAFF 50%, #C2DAFF 100%);
-  animation: shimmer 2s infinite;
+  background: linear-gradient(135deg, #E8F0FE 0%, #C5D8FC 50%, #A8C5FA 100%);
+  animation: shimmer 2.5s ease-in-out infinite;
 }
 
 @keyframes shimmer {
-  0% { opacity: 0.6; }
+  0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
-  100% { opacity: 0.6; }
 }
 
-.dest-name {
-  font-size: 18px;
-  font-weight: 700;
-  color: #fff;
-  text-shadow: 0 1px 4px rgba(0,0,0,0.3);
-  margin-bottom: 4px;
+.carousel-fade-enter-active {
+  transition: all 0.65s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.dest-card:nth-child(1) .dest-name { font-size: 24px; }
+.carousel-fade-leave-active {
+  transition: all 0.45s cubic-bezier(0.4, 0, 1, 1);
+}
 
-.dest-action {
-  font-size: 13px;
-  color: rgba(255,255,255,0.8);
+.carousel-fade-enter-from {
   opacity: 0;
-  transform: translateY(6px);
-  transition: all 0.3s;
+  transform: translateY(16px) scale(0.98);
+  filter: blur(3px);
 }
 
-.fade-enter-active, .fade-leave-active { transition: opacity 0.6s ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+.carousel-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-12px) scale(0.98);
+  filter: blur(2px);
+}
 </style>
