@@ -13,7 +13,7 @@ cache:
 
 backend-build:
   stage: build
-  image: maven:3.9-eclipse-temurin-17
+  image: maven:3.9-eclipse-temurin-21
   script:
     - mkdir -p /root/.m2
     - printf '<?xml version="1.0" encoding="UTF-8"?>\n<settings>\n  <mirrors>\n    <mirror>\n      <id>aliyun</id>\n      <name>Aliyun Maven Mirror</name>\n      <url>https://maven.aliyun.com/repository/central</url>\n      <mirrorOf>central</mirrorOf>\n    </mirror>\n  </mirrors>\n</settings>\n' > /root/.m2/settings.xml
