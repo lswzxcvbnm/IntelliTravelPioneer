@@ -1,0 +1,35 @@
+stages:
+  - build
+
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  npm_config_cache: "$CI_PROJECT_DIR/.npm"
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .m2/repository/
+    - planclient/node_modules/
+
+backend-build:
+  stage: build
+  image: maven:3.9-eclipse-temurin-17
+  script:
+    - cd intellitravel-pioneer
+    - ./mvnw clean package -Dmaven.test.skip=true -B
+  artifacts:
+    paths:
+      - intellitravel-pioneer/target/*.jar
+    expire_in: 1 week
+
+frontend-build:
+  stage: build
+  image: node:20
+  script:
+    - cd planclient
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - planclient/dist/
+    expire_in: 1 week
