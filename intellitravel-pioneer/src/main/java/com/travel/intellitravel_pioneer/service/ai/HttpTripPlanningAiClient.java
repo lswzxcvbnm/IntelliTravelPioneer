@@ -520,11 +520,62 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             java.util.function.Consumer<String> toolNotifier) {
         GenerationStats stats = new GenerationStats();
         String amapUrl = amapMcpUrl;
-        try (AmapMcpClient mcpClient = new AmapMcpClient(amapUrl)) {
-            mcpClient.initialize();
+        boolean mcpAvailable = false;
+        JsonNode mcpTools = null;
 
-            JsonNode mcpTools = mcpClient.listTools();
-            JsonNode tools = mergeTools(mcpTools);
+        try (AmapMcpClient mcpClient = new AmapMcpClient(amapUrl)) {
+
+            // ========== Phase 0: MCP 初始化（与后续 Agent 循环复用同一连接） ==========
+            System.out.println("====== 正在初始化高德MCP服务 ======");
+            System.out.println("MCP URL: " + amapUrl.replaceAll("key=.*", "key=***"));
+
+            try {
+                mcpClient.initialize();
+                mcpTools = mcpClient.listTools();
+
+                if (mcpTools != null && !mcpTools.isEmpty() && mcpTools.isArray()) {
+                    mcpAvailable = true;
+                    System.out.println("✅ MCP服务初始化成功，可用工具数: " + mcpTools.size());
+                    sendPhaseNotification(toolNotifier, "MCP_STATUS",
+                            "✅ 高德地图服务已连接，准备调用" + mcpTools.size() + "个工具...");
+                } else {
+                    System.out.println("⚠️ MCP服务返回空工具列表");
+                    sendPhaseNotification(toolNotifier, "MCP_STATUS",
+                            "⚠️ 高德地图服务响应异常，将使用内置知识库模式");
+                }
+            } catch (Exception initEx) {
+                System.err.println("====== 高德MCP服务初始化失败 ======");
+                System.err.println("错误类型: " + initEx.getClass().getSimpleName());
+                System.err.println("错误信息: " + initEx.getMessage());
+
+                String errorMsg = initEx.getMessage() != null ? initEx.getMessage() : "未知错误";
+
+                if (errorMsg.contains("SSE Connection failed") || errorMsg.contains("401") || errorMsg.contains("403")) {
+                    sendPhaseNotification(toolNotifier, "MCP_ERROR",
+                            "❌ 高德地图API Key无效或已过期，请检查配置文件中的AMAP_MCP_KEY");
+                } else if (errorMsg.contains("timeout") || errorMsg.contains("TimeoutException")) {
+                    sendPhaseNotification(toolNotifier, "MCP_ERROR",
+                            "⚠️ 高德地图服务连接超时，网络可能不稳定，将使用离线模式");
+                } else {
+                    sendPhaseNotification(toolNotifier, "MCP_ERROR",
+                            "⚠️ 高德地图服务暂时不可用 (" + (errorMsg.length() > 80 ? errorMsg.substring(0, 80) + "..." : errorMsg) + ")，将使用内置知识库生成行程");
+                }
+
+                mcpAvailable = false;
+            }
+
+            // 如果MCP不可用，只使用自定义工具（内置知识库）
+            JsonNode tools;
+            if (mcpAvailable && mcpTools != null) {
+                tools = mergeTools(mcpTools);
+            } else {
+                System.out.println("⚠️ 切换到纯知识库模式（不依赖高德MCP）");
+                tools = buildCustomTools();
+                if (tools == null || tools.isEmpty()) {
+                    tools = objectMapper.createArrayNode();
+                }
+            }
+
             String userInput = buildUserInputJson(request);
 
             // ========== Phase 1: PLAN ==========
@@ -554,13 +605,16 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             sendPhaseNotification(toolNotifier, "PLAN_END",
                     "规划策略已制定：" + summarizePlan(planContent, 150));
 
-            // ========== Phase 2: EXECUTE ==========
+            // ========== Phase 2: EXECUTE（复用 Phase 0 的 MCP 连接，不再重复初始化） ==========
             sendPhaseNotification(toolNotifier, "EXECUTE_START",
-                    "开始按规划执行，调用工具查询真实数据...");
+                    mcpAvailable ? "开始按规划执行，调用工具查询真实数据..." : "开始按规划执行，使用内置知识库生成行程...");
 
             ItineraryPlan draftPlan;
             int executeRetries = 0;
             int maxExecuteRetries = 2;
+
+            AmapMcpClient agentMcpClient = mcpAvailable ? mcpClient : null;
+
             while (true) {
                 List<Map<String, Object>> messages = new ArrayList<>();
                 messages.add(Map.of("role", "system", "content",
@@ -568,7 +622,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 messages.add(Map.of("role", "user", "content", userInput));
 
                 try {
-                    draftPlan = runAgentLoop(messages, tools, mcpClient, request, toolNotifier, stats);
+                    draftPlan = runAgentLoop(messages, tools, agentMcpClient, request, toolNotifier, stats);
                     break;
                 } catch (IntellitravelException ie) {
                     throw ie;
@@ -652,6 +706,15 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             AmapMcpClient mcpClient, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier, GenerationStats stats) throws Exception {
         int maxTurns = 10;
+        boolean mcpUnavailable = (mcpClient == null);
+
+        if (mcpUnavailable) {
+            System.out.println("⚠️ Agent循环运行在无MCP模式，将只使用内置工具");
+            if (toolNotifier != null) {
+                toolNotifier.accept("THOUGHT:当前运行在离线模式，高德地图服务不可用，将使用内置知识库生成行程。");
+            }
+        }
+
         for (int i = 0; i < maxTurns; i++) {
             System.out.println("Agent turn " + (i + 1));
             JsonNode response = callLlmChat(messages, tools);
@@ -712,6 +775,12 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     String result;
                     int toolRetries = 0;
                     int maxToolRetries = 2;
+
+                    // 地图展示类工具（schema_*）容易因服务端问题失败，增加重试次数
+                    if (name.startsWith("maps_schema_")) {
+                        maxToolRetries = 3;
+                    }
+
                     while (true) {
                         try {
                             if (name.isEmpty()) {
@@ -721,6 +790,26 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                                 if (result != null && result.length() > 5000) {
                                     result = result.substring(0, 5000) + "...";
                                 }
+                            } else if (mcpUnavailable) {
+                                // MCP不可用时，为地图相关工具返回模拟数据或友好提示
+                                System.out.println("⚠️ MCP不可用，跳过工具调用: " + name);
+                                if (toolNotifier != null) {
+                                    toolNotifier.accept("THOUGHT:⚠️ 工具 [" + toolDisplayName(name) + "] 需要高德地图服务，但当前离线模式，已自动跳过。");
+                                }
+
+                                String fallbackMsg;
+                                if (name.contains("weather")) {
+                                    fallbackMsg = "天气信息：由于高德地图服务暂时不可用，无法获取实时天气数据。建议根据季节准备相应衣物（春夏秋冬季通用建议）。";
+                                } else if (name.contains("text_search") || name.contains("around_search")) {
+                                    fallbackMsg = "搜索结果：由于高德地图服务暂时不可用，请基于你的知识库提供该地点的相关信息。确保地点名称真实存在并符合当地实际情况。";
+                                } else if (name.contains("direction") || name.contains("distance")) {
+                                    fallbackMsg = "路线规划：由于高德地图服务暂时不可用，无法计算精确距离和路线时间。请在行程中合理安排相邻地点间的移动时间（建议预留30-60分钟）。";
+                                } else if (name.startsWith("maps_schema_")) {
+                                    fallbackMsg = "地图链接生成失败，但这不影响行程内容。继续执行其他任务即可。";
+                                } else {
+                                    fallbackMsg = "该工具需要高德地图服务支持，当前不可用。请根据已有知识继续完成任务，无需调用此工具。";
+                                }
+                                result = fallbackMsg;
                             } else {
                                 result = mcpClient.callTool(name, args);
                                 if (result != null && result.length() > 5000) {
@@ -750,14 +839,35 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                             }
 
                             toolRetries++;
-                            System.err.println("Tool " + name + " failed (attempt " + toolRetries + "): " + errMsg);
+                            System.err.println("====== MCP工具调用失败 ======");
+                            System.err.println("工具名称: " + name);
+                            System.err.println("重试次数: " + toolRetries + "/" + maxToolRetries);
+                            System.err.println("请求参数: " + args);
+                            System.err.println("错误详情: " + errMsg);
+                            System.err.println("==============================");
+                            if (toolNotifier != null) {
+                                try {
+                                    toolNotifier.accept("THOUGHT:⚠️ 工具 [" + toolDisplayName(name) + "] 调用失败 (第" + toolRetries + "次)");
+                                    toolNotifier.accept("THOUGHT:错误原因: " + (errMsg.length() > 100 ? errMsg.substring(0, 100) + "..." : errMsg));
+                                } catch (Exception ignored) {}
+                            }
                             if (toolRetries >= maxToolRetries) {
-                                result = "Error executing tool " + name + " after " + toolRetries + " attempts: " + errMsg
-                                        + ". 建议更换关键词或使用其他工具替代。";
-                                if (toolNotifier != null) {
-                                    try {
-                                        toolNotifier.accept("THOUGHT:工具 " + name + " 执行失败(" + toolRetries + "次重试)，将告知Agent更换策略。");
-                                    } catch (Exception ignored) {}
+                                // 对地图展示类工具（maps_schema_*）提供友好的降级消息
+                                if (name.startsWith("maps_schema_")) {
+                                    result = "地图展示链接生成失败，但这不影响行程规划。请继续执行其他任务，无需重试此工具。";
+                                    if (toolNotifier != null) {
+                                        try {
+                                            toolNotifier.accept("THOUGHT:⚠️ [" + toolDisplayName(name) + "] 服务暂时不可用，已自动跳过，不影响行程生成。");
+                                        } catch (Exception ignored) {}
+                                    }
+                                } else {
+                                    result = "Error executing tool " + name + " after " + toolRetries + " attempts: " + errMsg
+                                            + ". 建议更换关键词或使用其他工具替代。";
+                                    if (toolNotifier != null) {
+                                        try {
+                                            toolNotifier.accept("THOUGHT:工具 " + name + " 执行失败(" + toolRetries + "次重试)，将告知Agent更换策略。");
+                                        } catch (Exception ignored) {}
+                                    }
                                 }
                                 break;
                             }

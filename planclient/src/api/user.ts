@@ -28,9 +28,7 @@ export function login(data: LoginRequest) {
 }
 
 export function getInformation(username: string) {
-    return axios.get<ApiResponse<UserVO>>(`${USER_MODULE}/information`, {
-        params: { username }
-    })
+    return axios.get<ApiResponse<UserVO>>(`${USER_MODULE}/${encodeURIComponent(username)}`)
 }
 
 export function getHealthInformation(username: string) {

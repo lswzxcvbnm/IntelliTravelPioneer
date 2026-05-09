@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="customize-shell">
     <div class="customize-main">
       <header class="top-bar">
@@ -97,8 +97,20 @@
                       <div class="timeline-card">
                         <div class="card-header-row">
                           <div class="card-info">
-                            <div class="card-title">{{ item.name || '未命名路线项' }}</div>
+                            <div class="card-title-row">
+                              <div class="card-title">{{ item.name || '未命名路线项' }}</div>
+                              <button v-if="hasLocation(item)" class="map-link-btn" @click="openMap(item)" title="在地图中查看">
+                                📍 地图
+                              </button>
+                            </div>
                             <div class="card-desc">{{ item.description || '暂无描述' }}</div>
+                            <div v-if="hasLocation(item) && item.location?.name" class="card-location">
+                              <span class="location-icon">📍</span>
+                              <span class="location-name">{{ item.location.name }}</span>
+                              <span v-if="formatCoordinates(item)" class="location-coords">
+                                {{ formatCoordinates(item) }}
+                              </span>
+                            </div>
                           </div>
                           <span class="drag-handle">⋮⋮</span>
                         </div>
@@ -163,143 +175,248 @@
     </div>
 
     <aside class="agent-panel" v-if="(step === 1 && isLoadingGenerate) || (step === 2 && isRefining)">
-      <div class="agent-panel-header">
-        <span class="agent-panel-icon">🤖</span>
-        <span>Agent 思考过程</span>
-        <span class="agent-panel-badge active">运行中</span>
+      <div class="ap-head">
+        <span class="ap-head-dot pulse"></span>
+        <span class="ap-head-title">{{ isRefining ? 'Agent 正在优化方案' : 'Agent 正在生成方案' }}</span>
       </div>
 
-      <div class="phase-indicator">
-        <div class="phase-steps">
-          <div class="phase-step" :class="{ active: currentAgentPhase === 'PLAN_START' || currentAgentPhase === 'PLAN_END', done: isPhaseDone('PLAN_END', currentAgentPhase) }">
-            <span class="phase-dot">1</span><span class="phase-label">规划</span>
-          </div>
-          <div class="phase-line" :class="{ filled: isPhaseDone('PLAN_END', currentAgentPhase) }"></div>
-          <div class="phase-step" :class="{ active: currentAgentPhase === 'EXECUTE_START' || currentAgentPhase === 'EXECUTE_END', done: isPhaseDone('EXECUTE_END', currentAgentPhase) }">
-            <span class="phase-dot">2</span><span class="phase-label">执行</span>
-          </div>
-          <div class="phase-line" :class="{ filled: isPhaseDone('EXECUTE_END', currentAgentPhase) }"></div>
-          <div class="phase-step" :class="{ active: currentAgentPhase === 'VERIFY_START' || currentAgentPhase === 'VERIFY_END', done: currentAgentPhase === 'VERIFY_END' }">
-            <span class="phase-dot">3</span><span class="phase-label">验证</span>
-          </div>
+      <div class="ap-progress-bar">
+        <div class="ap-progress-segment" v-for="(p, i) in ['规划','执行','验证']" :key="i"
+          :class="{ active: getPhaseProgress(i) === 'active', done: getPhaseProgress(i) === 'done' }">
+          <span class="ap-progress-dot">{{ getPhaseProgress(i) === 'done' ? '&#10003;' : i + 1 }}</span>
+          <span class="ap-progress-label">{{ p }}</span>
         </div>
+        <div class="ap-progress-line" :style="{ width: progressLineWidth }"></div>
       </div>
 
-      <div class="agent-log-stream" ref="agentLogRef">
-        <div v-for="(entry, idx) in activeAgentLogs" :key="idx" class="log-row">
-          <div v-if="entry.type === 'phase'" class="phase-banner" :class="{ 'phase-done': entry.phaseType?.endsWith('_END') }">
-            <span class="phase-icon">{{ entry.phaseType?.endsWith('_END') ? '✓' : '▶' }}</span>
-            <span class="phase-msg">{{ entry.message }}</span>
-          </div>
-          <div v-else-if="entry.type === 'thought'" class="thought-bubble">
-            <span class="thought-icon">💭</span>
-            <span class="thought-text">{{ entry.message }}</span>
-          </div>
-          <div v-else-if="entry.type === 'tool'" class="tool-call-row">
-            <span class="tool-icon">🔧</span>
-            <span class="tool-text">{{ entry.message }}</span>
-          </div>
-        </div>
-        <div class="stream-cursor" v-if="activeAgentLogs.length > 0">▋</div>
+      <div class="ap-action-bar" v-if="currentFocusAction">
+        <span class="ap-action-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </span>
+        <span class="ap-action-text">{{ currentFocusAction }}</span>
+        <span class="ap-action-bar-shimmer"></span>
       </div>
 
-      <div class="agent-panel-empty" v-if="activeAgentLogs.length === 0">
-        <p>等待 Agent 开始思考...</p>
-      </div>
-    </aside>
-
-    <aside class="agent-panel agent-panel-idle" v-else-if="step === 1">
-      <div class="agent-panel-header">
-        <span class="agent-panel-icon">🤖</span>
-        <span>Agent 面板</span>
-        <span class="agent-panel-badge idle">待机中</span>
-      </div>
-      <div class="agent-panel-idle-content">
-        <div class="idle-icon">✨</div>
-        <p>填写左侧表单后点击<br /><strong>"生成 AI 方案"</strong><br />Agent 将在这里展示<br />实时规划与思考过程</p>
-      </div>
-    </aside>
-
-    <aside class="agent-panel agent-panel-idle" v-else-if="step >= 2 && !isRefining">
-      <div class="agent-panel-header">
-        <span class="agent-panel-icon">🤖</span>
-        <span>Agent 面板</span>
-        <span class="agent-panel-badge done">已完成</span>
-      </div>
-      <div class="agent-log-stream readonly">
-        <div class="agent-summary-card">
-          <div class="summary-title">📋 最近一次 {{ isRefining ? '修改' : '生成' }}摘要</div>
-          <div class="summary-stats">
-            <div class="summary-stat">
-              <span class="summary-stat-label">模型</span>
-              <span class="summary-stat-value">GLM-5 / Qwen3-8B</span>
-            </div>
-            <div class="summary-stat">
-              <span class="summary-stat-label">行程天数</span>
-              <span class="summary-stat-value">{{ editablePlan?.totalDays || '-' }} 天</span>
-            </div>
-            <div class="summary-stat">
-              <span class="summary-stat-label">路线项</span>
-              <span class="summary-stat-value">{{ routeItemCount }} 个</span>
-            </div>
-            <div class="summary-stat">
-              <span class="summary-stat-label">预算</span>
-              <span class="summary-stat-value">{{ formatCurrency(editablePlan?.estimatedCost || 0) }}</span>
-            </div>
-          </div>
-
-          <div class="summary-section" v-if="activeStats">
-            <div class="summary-section-title">📊 Token 消耗</div>
-            <div class="summary-stats">
-              <div class="summary-stat">
-                <span class="summary-stat-label">总计 Token</span>
-                <span class="summary-stat-value">{{ activeStats.totalTokens.toLocaleString() }}</span>
+      <div class="ap-body" ref="agentLogRef">
+        <template v-if="groupedLogs.length > 0">
+          <div v-for="(group, gi) in groupedLogs" :key="'g'+gi" class="ap-group">
+            <div class="ap-phase-row" :class="{ done: group.entries.some(e => e.phaseType?.endsWith('_END')) }" @click="toggleGroupExpand(group.phase)">
+              <div class="ap-phase-node" :class="{ active: expandedGroups.has(group.phase) }">
+                <span v-if="group.entries.some(e => e.phaseType?.endsWith('_END'))" class="ap-node-check">&#10003;</span>
+                <span v-else class="ap-node-num">{{ gi + 1 }}</span>
               </div>
-              <div class="summary-stat">
-                <span class="summary-stat-label">提示词 Token</span>
-                <span class="summary-stat-value">{{ activeStats.totalPromptTokens.toLocaleString() }}</span>
-              </div>
-              <div class="summary-stat">
-                <span class="summary-stat-label">生成 Token</span>
-                <span class="summary-stat-value">{{ activeStats.totalCompletionTokens.toLocaleString() }}</span>
-              </div>
-              <div class="summary-stat">
-                <span class="summary-stat-label">API 调用</span>
-                <span class="summary-stat-value">{{ activeStats.planCalls + activeStats.executeCalls + activeStats.verifyCalls }} 次</span>
-              </div>
+              <span class="ap-phase-name">{{ getPhaseGroupName(group.phase) }}</span>
+              <span class="ap-phase-count">{{ group.entries.filter(e => e.type === 'tool').length }} 工具</span>
+              <span class="ap-phase-arrow" :class="{ open: expandedGroups.has(group.phase) }">&#8250;</span>
             </div>
 
-            <div class="summary-section" v-if="activeStats.toolCalls && activeStats.toolCalls.length > 0">
-              <div class="summary-section-title">🔧 工具调用明细（{{ activeStats.toolCalls.length }} 次）</div>
-              <div class="tool-call-list">
-                <div class="tool-call-item" v-for="(tc, idx) in activeStats.toolCalls" :key="idx">
-                  <span class="tool-call-status" :class="tc.status === 'success' ? 'status-ok' : 'status-fail'">
-                    {{ tc.status === 'success' ? '✓' : '✗' }}
-                  </span>
-                  <span class="tool-call-name">{{ tc.displayName }}</span>
+            <transition name="ap-slide">
+              <div v-if="expandedGroups.has(group.phase)" class="ap-phase-body">
+                <div v-for="(entry, ei) in group.entries" :key="ei" class="ap-entry">
+                  <template v-if="entry.type === 'thought' && !isEmptyEntry(entry)">
+                    <div class="ap-thought" :class="{ collapsed: !isThoughtExpanded(getGlobalIndex(gi, ei)) }" @click="toggleActiveThought(getGlobalIndex(gi, ei))">
+                      <div class="ap-thought-bar"></div>
+                      <div class="ap-thought-inner">
+                        <div class="ap-thought-header">
+                          <span class="ap-thought-icon">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                          </span>
+                          <span class="ap-thought-label">推理</span>
+                          <span class="ap-thought-toggle">{{ isThoughtExpanded(getGlobalIndex(gi, ei)) ? '收起' : '展开' }}</span>
+                        </div>
+                        <div v-if="isThoughtExpanded(getGlobalIndex(gi, ei))" class="ap-thought-full" v-html="formatThoughtMessage(entry.message)"></div>
+                        <div v-else class="ap-thought-brief">{{ getThoughtPreview(entry.message) }}</div>
+                      </div>
+                    </div>
+                  </template>
+                  <template v-else-if="entry.type === 'tool' && !isEmptyEntry(entry)">
+                    <div class="ap-tool">
+                      <span class="ap-tool-dot" :class="getToolStatusClass(entry.message)"></span>
+                      <span class="ap-tool-icon">{{ getToolIcon(entry.message) }}</span>
+                      <span class="ap-tool-name">{{ extractToolName(entry.message) }}</span>
+                      <span class="ap-tool-status" :class="getToolStatusClass(entry.message)">{{ getToolStatusText(entry.message) }}</span>
+                    </div>
+                  </template>
                 </div>
               </div>
+            </transition>
+          </div>
+        </template>
+
+        <div class="ap-cursor" v-if="activeAgentLogs.length > 0">
+          <span class="ap-cursor-dot"></span>
+          <span class="ap-cursor-text">{{ currentFocusAction || '处理中...' }}</span>
+        </div>
+      </div>
+
+      <div class="ap-stats-bar" v-if="activeAgentLogs.length > 0">
+        <span class="ap-stats-item">
+          <span class="ap-stats-num">{{ thoughtLogCount }}</span> 思考
+        </span>
+        <span class="ap-stats-divider"></span>
+        <span class="ap-stats-item">
+          <span class="ap-stats-num">{{ toolLogCount }}</span> 工具
+        </span>
+        <span class="ap-stats-divider"></span>
+        <span class="ap-stats-item">
+          <span class="ap-stats-num">{{ phaseLogCount }}</span> 阶段
+        </span>
+      </div>
+
+      <div class="ap-empty" v-if="activeAgentLogs.length === 0">
+        <div class="ap-empty-ring">
+          <span class="ap-empty-spinner"></span>
+        </div>
+        <span class="ap-empty-text">等待 Agent 响应...</span>
+      </div>
+    </aside>
+
+    <aside class="agent-panel" v-else-if="step === 1">
+      <div class="ap-head">
+        <span class="ap-head-dot idle"></span>
+        <span class="ap-head-title">Agent</span>
+      </div>
+      <div class="ap-idle">
+        <div class="ap-idle-robot">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>
+        </div>
+        <div class="ap-idle-title">AI 旅行规划助手</div>
+        <p class="ap-idle-hint">填写左侧需求表单，点击<br/><strong>"生成 AI 方案"</strong></p>
+        <div class="ap-idle-features">
+          <div class="ap-idle-feat">
+            <span class="ap-idle-feat-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </span>
+            <span>实时展示 Agent 思考过程</span>
+          </div>
+          <div class="ap-idle-feat">
+            <span class="ap-idle-feat-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            </span>
+            <span>自动调用地图、天气等工具</span>
+          </div>
+          <div class="ap-idle-feat">
+            <span class="ap-idle-feat-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </span>
+            <span>智能验证行程合理性</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <aside class="agent-panel" v-else-if="step >= 2 && !isRefining">
+      <div class="ap-head">
+        <span class="ap-head-dot done"></span>
+        <span class="ap-head-title">生成完成</span>
+      </div>
+
+      <div class="ap-body">
+        <div class="ap-done-metrics">
+          <div class="ap-metric">
+            <span class="ap-metric-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </span>
+            <span class="ap-metric-val">{{ editablePlan?.totalDays || '-' }}</span>
+            <span class="ap-metric-label">天</span>
+          </div>
+          <div class="ap-metric">
+            <span class="ap-metric-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+            </span>
+            <span class="ap-metric-val">{{ routeItemCount }}</span>
+            <span class="ap-metric-label">路线项</span>
+          </div>
+          <div class="ap-metric">
+            <span class="ap-metric-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </span>
+            <span class="ap-metric-val">{{ formatCurrency(editablePlan?.estimatedCost || 0) }}</span>
+            <span class="ap-metric-label">预算</span>
+          </div>
+          <div class="ap-metric" v-if="activeStats">
+            <span class="ap-metric-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </span>
+            <span class="ap-metric-val">{{ activeStats.totalTokens.toLocaleString() }}</span>
+            <span class="ap-metric-label">Tokens</span>
+          </div>
+        </div>
+
+        <template v-if="activeStats">
+          <div class="ap-done-section">
+            <div class="ap-done-section-head">
+              <span class="ap-done-section-title">Token 消耗</span>
+            </div>
+            <div class="ap-token-bar">
+              <div class="ap-token-segment prompt" :style="{ width: tokenPromptPercent + '%' }"></div>
+              <div class="ap-token-segment completion" :style="{ width: tokenCompletionPercent + '%' }"></div>
+            </div>
+            <div class="ap-token-legend">
+              <span class="ap-token-item"><span class="ap-token-dot prompt"></span>提示 {{ activeStats.totalPromptTokens.toLocaleString() }}</span>
+              <span class="ap-token-item"><span class="ap-token-dot completion"></span>生成 {{ activeStats.totalCompletionTokens.toLocaleString() }}</span>
+              <span class="ap-token-item"><span class="ap-token-dot total"></span>API {{ activeStats.planCalls + activeStats.executeCalls + activeStats.verifyCalls }} 次</span>
             </div>
           </div>
+        </template>
 
-          <div class="summary-section" v-if="generatingLogs.length > 0">
-            <div class="summary-section-title">生成过程回顾</div>
-            <div v-for="(entry, idx) in generatingLogs" :key="'g'+idx" class="log-row mini">
-              <div v-if="entry.type === 'phase'" class="phase-banner" :class="{ 'phase-done': entry.phaseType?.endsWith('_END') }">
-                <span class="phase-icon">{{ entry.phaseType?.endsWith('_END') ? '✓' : '▶' }}</span>
-                <span class="phase-msg">{{ entry.message }}</span>
-              </div>
-              <div v-else-if="entry.type === 'thought'" class="thought-bubble">
-                <span class="thought-icon">💭</span>
-                <span class="thought-text">{{ entry.message }}</span>
+        <template v-if="activeStats && activeStats.toolCalls && activeStats.toolCalls.length > 0">
+          <div class="ap-done-section">
+            <div class="ap-done-section-head">
+              <span class="ap-done-section-title">工具调用</span>
+              <span class="ap-done-section-badge">{{ activeStats.toolCalls.length }}</span>
+            </div>
+            <div class="ap-done-tools">
+              <div v-for="(tc, idx) in activeStats.toolCalls" :key="idx" class="ap-done-tool">
+                <span class="ap-tool-dot" :class="tc.status === 'success' ? 'status-success' : 'status-skipped'"></span>
+                <span class="ap-done-tool-name">{{ tc.displayName }}</span>
               </div>
             </div>
+            <div class="ap-tool-stats-row">
+              <span class="ap-tool-stat success">{{ toolSuccessCount }} 成功</span>
+              <span class="ap-tool-stat skipped" v-if="toolSkippedCount > 0">{{ toolSkippedCount }} 跳过</span>
+            </div>
           </div>
+        </template>
 
-          <div class="summary-section" v-else>
-            <div class="summary-section-title">生成过程回顾</div>
-            <p class="summary-empty">暂无日志（行程可能来自加载或手动创建）。</p>
+        <template v-if="generatingLogs.length > 0">
+          <div class="ap-done-section">
+            <div class="ap-done-section-head">
+              <span class="ap-done-section-title">执行记录</span>
+              <button class="ap-done-toggle" @click="toggleSummaryDetail">{{ showFullSummary ? '收起' : '展开全部' }}</button>
+            </div>
+
+            <div v-if="!showFullSummary" class="ap-done-timeline">
+              <div v-for="(phase, idx) in summaryPhases" :key="'sp'+idx"
+                class="ap-done-step" :class="{ done: phase.phaseType?.endsWith('_END') }">
+                <span class="ap-done-step-dot" :class="{ done: phase.phaseType?.endsWith('_END') }"></span>
+                <span class="ap-done-step-name">{{ getPhaseShortName(phase.phaseType) }}</span>
+                <span class="ap-done-step-msg" v-if="isPhaseSummary(phase.message)">{{ phase.message }}</span>
+              </div>
+            </div>
+
+            <div v-else class="ap-done-fulllog">
+              <template v-for="(entry, idx) in filteredGeneratingLogs" :key="'lg'+idx">
+                <div v-if="entry.type === 'phase'" class="ap-done-log-phase">
+                  <span class="ap-done-log-icon">{{ entry.phaseType?.endsWith('_END') ? '&#10003;' : '&#8250;' }}</span>
+                  <span>{{ entry.message }}</span>
+                </div>
+                <div v-else-if="entry.type === 'thought' && !isEmptyEntry(entry)" class="ap-done-log-thought">
+                  <span class="ap-done-log-prefix">推理</span>
+                  <span>{{ isJsonMessage(entry.message) ? cleanJsonPreview(entry.message) : truncateText(entry.message, 120) }}</span>
+                </div>
+                <div v-else-if="entry.type === 'tool' && !isEmptyEntry(entry)" class="ap-done-log-tool">
+                  <span class="ap-tool-dot" :class="getToolStatusClass(entry.message)"></span>
+                  <span>{{ getToolIcon(entry.message) }}</span>
+                  <span>{{ extractToolName(entry.message) }}</span>
+                </div>
+              </template>
+            </div>
           </div>
+        </template>
+
+        <div class="ap-done-section" v-else>
+          <p class="ap-done-empty">暂无执行记录</p>
         </div>
       </div>
     </aside>
@@ -364,6 +481,23 @@ const activeAgentLogs = computed(() => {
   return []
 })
 
+// ===== 日志压缩 =====
+const currentFocusAction = computed(() => {
+  const logs = activeAgentLogs.value
+  if (logs.length === 0) return ''
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const entry = logs[i]
+    if (entry.type === 'tool' && entry.message.includes('正在')) {
+      return entry.message
+    }
+    if (entry.type === 'thought') {
+      const text = entry.message.length > 50 ? entry.message.substring(0, 50) + '...' : entry.message
+      return '思考: ' + text
+    }
+  }
+  return ''
+})
+
 const activeStats = computed(() => {
   if (generationStats.value) return generationStats.value
   if (refineStats.value) return refineStats.value
@@ -371,10 +505,92 @@ const activeStats = computed(() => {
   return null
 })
 
+const tokenPromptPercent = computed(() => {
+  if (!activeStats.value) return 50
+  const total = activeStats.value.totalTokens || 1
+  return Math.round((activeStats.value.totalPromptTokens / total) * 100)
+})
+
+const tokenCompletionPercent = computed(() => {
+  if (!activeStats.value) return 50
+  return 100 - tokenPromptPercent.value
+})
+
+const toolSuccessCount = computed(() => {
+  if (!activeStats.value?.toolCalls) return 0
+  return activeStats.value.toolCalls.filter(t => t.status === 'success').length
+})
+
+const toolSkippedCount = computed(() => {
+  if (!activeStats.value?.toolCalls) return 0
+  return activeStats.value.toolCalls.filter(t => t.status !== 'success').length
+})
+
+const phaseLogCount = computed(() => activeAgentLogs.value.filter(e => e.type === 'phase').length)
+const thoughtLogCount = computed(() => activeAgentLogs.value.filter(e => e.type === 'thought').length)
+const toolLogCount = computed(() => activeAgentLogs.value.filter(e => e.type === 'tool').length)
+
+const phaseProgressMap: Record<string, number> = { PLAN_START: 0, PLAN_END: 1, EXECUTE_START: 1, EXECUTE_END: 2, VERIFY_START: 2, VERIFY_END: 3 }
+const getPhaseProgress = (stepIndex: number): 'pending' | 'active' | 'done' => {
+  const current = currentAgentPhase.value
+  const progress = phaseProgressMap[current] ?? -1
+  if (stepIndex < progress) return 'done'
+  if (stepIndex === progress) return 'active'
+  return 'pending'
+}
+
+const progressLineWidth = computed(() => {
+  const current = currentAgentPhase.value
+  const progress = phaseProgressMap[current] ?? 0
+  return Math.min(progress / 3 * 100, 100) + '%'
+})
+
 watch(activeAgentLogs, async () => {
   await nextTick()
   if (agentLogRef.value) {
     agentLogRef.value.scrollTop = agentLogRef.value.scrollHeight
+  }
+})
+
+watch(
+  () => activeAgentLogs.value.length,
+  (newLen, oldLen) => {
+    if (newLen < (oldLen || 0)) {
+      manuallyToggledThoughts.value = new Set()
+      expandedActiveThoughts.value = new Set()
+      return
+    }
+    const logs = activeAgentLogs.value
+    const thoughtIndices: number[] = []
+    for (let i = 0; i < logs.length; i++) {
+      if (logs[i].type === 'thought' && !isEmptyEntry(logs[i])) {
+        thoughtIndices.push(i)
+      }
+    }
+    const recentThree = thoughtIndices.slice(-3)
+    const newExpanded = new Set(expandedActiveThoughts.value)
+    for (const idx of recentThree) {
+      if (!manuallyToggledThoughts.value.has(idx)) {
+        newExpanded.add(idx)
+      }
+    }
+    for (const idx of thoughtIndices.slice(0, -3)) {
+      if (!manuallyToggledThoughts.value.has(idx)) {
+        newExpanded.delete(idx)
+      }
+    }
+    expandedActiveThoughts.value = newExpanded
+  }
+)
+
+watch(currentAgentPhase, (newPhase, oldPhase) => {
+  if (newPhase !== oldPhase && oldPhase) {
+    const newExpanded = new Set(expandedGroups.value)
+    const oldGroup = oldPhase.replace(/_START|_END/, '')
+    newExpanded.delete(oldGroup)
+    const newGroup = newPhase.replace(/_START|_END/, '')
+    newExpanded.add(newGroup)
+    expandedGroups.value = newExpanded
   }
 })
 
@@ -410,8 +626,253 @@ const getLogMessage = (msg: string) => {
   return toolNameMapping[msg] || msg
 }
 
-const phaseOrder = ['PLAN_START', 'PLAN_END', 'EXECUTE_START', 'EXECUTE_END', 'VERIFY_START', 'VERIFY_END']
-const isPhaseDone = (target: string, cur: string) => phaseOrder.indexOf(cur) > phaseOrder.indexOf(target)
+// ===== 分组显示 =====
+const expandedGroups = ref<Set<string>>(new Set(['PLAN']))
+
+const expandedActiveThoughts = ref<Set<number>>(new Set())
+const manuallyToggledThoughts = ref<Set<number>>(new Set())
+
+const isThoughtExpanded = (idx: number): boolean => {
+  return expandedActiveThoughts.value.has(idx)
+}
+
+const toggleActiveThought = (idx: number) => {
+  manuallyToggledThoughts.value.add(idx)
+  const newSet = new Set(expandedActiveThoughts.value)
+  if (newSet.has(idx)) {
+    newSet.delete(idx)
+  } else {
+    newSet.add(idx)
+  }
+  expandedActiveThoughts.value = newSet
+}
+
+const getThoughtPreview = (msg: string): string => {
+  let text = msg
+  if (text.startsWith('THOUGHT:')) text = text.replace('THOUGHT:', '').trim()
+  if (text.length <= 80) return text
+  return text.substring(0, 80) + '...'
+}
+
+interface PhaseGroup {
+  phase: string
+  entries: LogEntry[]
+}
+
+const groupedLogs = computed((): PhaseGroup[] => {
+  const logs = activeAgentLogs.value
+  const groups: PhaseGroup[] = []
+  let currentPhase = 'INIT'
+  let currentEntries: LogEntry[] = []
+
+  for (const entry of logs) {
+    if (entry.type === 'phase') {
+      if (currentEntries.length > 0) {
+        groups.push({ phase: currentPhase, entries: currentEntries })
+        currentEntries = []
+      }
+      currentPhase = entry.phaseType?.replace(/_START|_END/, '') || 'UNKNOWN'
+    }
+    currentEntries.push(entry)
+  }
+
+  if (currentEntries.length > 0) {
+    groups.push({ phase: currentPhase, entries: currentEntries })
+  }
+
+  return groups
+})
+
+const toggleGroupExpand = (phase: string) => {
+  const newSet = new Set(expandedGroups.value)
+  if (newSet.has(phase)) {
+    newSet.delete(phase)
+  } else {
+    newSet.add(phase)
+  }
+  expandedGroups.value = newSet
+}
+
+const getGlobalIndex = (groupIdx: number, entryIdx: number): number => {
+  let count = 0
+  for (let i = 0; i < groupIdx; i++) {
+    count += groupedLogs.value[i].entries.length
+  }
+  return count + entryIdx
+}
+
+const getPhaseGroupName = (phase: string): string => {
+  const names: Record<string, string> = {
+    PLAN: '规划阶段',
+    EXECUTE: '执行阶段',
+    VERIFY: '验证阶段',
+    INIT: '初始化',
+    UNKNOWN: '其他'
+  }
+  return names[phase] || '其他'
+}
+
+const getToolIcon = (message: string): string => {
+  if (message.includes('weather')) return '🌤️'
+  if (message.includes('search') || message.includes('Search')) return '🔍'
+  if (message.includes('direction') || message.includes('路线')) return '🗺️'
+  if (message.includes('distance')) return '📏'
+  if (message.includes('schema') || message.includes('地图')) return '🗺️'
+  if (message.includes('info') || message.includes('destination')) return 'ℹ️'
+  return '🔧'
+}
+
+const extractToolName = (message: string): string => {
+  const match = message.match(/Invoking tool: (\w+)/)
+  if (match && match[1]) {
+    const nameMap: Record<string, string> = {
+      maps_weather: '天气查询',
+      maps_text_search: '地点搜索',
+      maps_around_search: '周边搜索',
+      maps_search_detail: '地点详情',
+      maps_direction_driving: '驾车路线',
+      maps_direction_walking: '步行路线',
+      maps_direction_bicycling: '骑行路线',
+      maps_direction_transit_integrated: '公交路线',
+      maps_distance: '距离测量',
+      maps_geo: '坐标解析',
+      maps_regeocode: '地址解析',
+      maps_schema_personal_map: '地图展示',
+      maps_schema_navi: '导航链接',
+      maps_schema_take_taxi: '打车链接',
+      search_destination_info: '目的地信息'
+    }
+    return nameMap[match[1]] || match[1]
+  }
+  return message.substring(0, 30) + (message.length > 30 ? '...' : '')
+}
+
+const getToolStatusClass = (message: string): string => {
+  if (message.includes('completed') || message.includes('完成')) return 'status-success'
+  if (message.includes('failed') || message.includes('失败') || message.includes('跳过')) return 'status-skipped'
+  return 'status-running'
+}
+
+const getToolStatusText = (message: string): string => {
+  if (message.includes('completed') || message.includes('完成')) return '已完成'
+  if (message.includes('failed') || message.includes('失败')) return '失败'
+  if (message.includes('跳过')) return '已跳过'
+  return '执行中'
+}
+
+const formatThoughtMessage = (msg: string): string => {
+  let formatted = msg
+  if (formatted.startsWith('THOUGHT:')) {
+    formatted = formatted.replace('THOUGHT:', '').trim()
+  }
+  formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+  formatted = formatted.replace(/`(.*?)`/g, '<code>$1</code>')
+  return formatted
+}
+
+// ===== 新增：位置信息和地图功能 =====
+const hasLocation = (item: { location?: { lat?: number | string; lng?: number | string; name?: string } }): boolean => {
+  return !!(item.location && (item.location.lat || item.location.lng || item.location.name))
+}
+
+const formatCoordinates = (item: { location?: { lat?: number | string; lng?: number | string } }): string | null => {
+  if (!item.location) return null
+  const lat = Number(item.location.lat)
+  const lng = Number(item.location.lng)
+  if (isNaN(lat) || isNaN(lng)) return null
+  return `(${lat.toFixed(4)}, ${lng.toFixed(4)})`
+}
+
+const openMap = (item: { location?: { lat?: number | string; lng?: number | string; name?: string }; name?: string }) => {
+  if (!item.location) {
+    alert('该地点暂无坐标信息')
+    return
+  }
+  const lat = Number(item.location.lat || 0)
+  const lng = Number(item.location.lng || 0)
+  if (!lat || !lng) {
+    alert('该地点暂无坐标信息')
+    return
+  }
+  const name = encodeURIComponent(item.location.name || item.name || '目的地')
+  window.open(`https://uri.amap.com/marker?position=${lng},${lat}&name=${name}`, '_blank')
+}
+
+// ===== 生成过程总结 =====
+const showFullSummary = ref(false)
+
+const toggleSummaryDetail = () => {
+  showFullSummary.value = !showFullSummary.value
+}
+
+// 过滤空白和无效的日志条目
+const filteredGeneratingLogs = computed(() => {
+  return generatingLogs.value.filter(entry => !isEmptyEntry(entry))
+})
+
+// 检查是否为空白的entry
+const isEmptyEntry = (entry: LogEntry): boolean => {
+  if (!entry.message) return true
+  const trimmed = entry.message.trim()
+  if (trimmed.length === 0) return true
+  if (trimmed === 'THOUGHT:') return true
+  if (trimmed.startsWith('THOUGHT:') && trimmed.replace('THOUGHT:', '').trim().length === 0) return true
+  return false
+}
+
+// 提取阶段节点（用于时间线显示）
+const summaryPhases = computed(() => {
+  return generatingLogs.value.filter(entry => entry.type === 'phase')
+})
+
+// 判断是否为阶段总结消息（非开始/结束标记）
+const isPhaseSummary = (message: string): boolean => {
+  return !!message && !message.includes('开始') && !message.includes('完成') && message.length > 10
+}
+
+// 获取阶段的简短名称
+const getPhaseShortName = (phaseType?: string): string => {
+  const names: Record<string, string> = {
+    PLAN_START: '规划',
+    PLAN_END: '✅ 规划完成',
+    EXECUTE_START: '执行',
+    EXECUTE_END: '✅ 执行完成',
+    VERIFY_START: '验证',
+    VERIFY_END: '✅ 验证完成'
+  }
+  return names[phaseType || ''] || phaseType || '未知'
+}
+
+const isJsonMessage = (msg: string): boolean => {
+  if (!msg) return false
+  const trimmed = msg.trim()
+  return (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+         (trimmed.startsWith('[') && trimmed.endsWith(']'))
+}
+
+// 清理JSON预览文本
+const cleanJsonPreview = (msg: string): string => {
+  try {
+    const parsed = JSON.parse(msg)
+    if (parsed.status) return `状态: ${parsed.status}`
+    if (parsed.summary) return String(parsed.summary)
+    if (parsed.message) return String(parsed.message)
+    return JSON.stringify(parsed).substring(0, 100)
+  } catch {
+    return msg
+  }
+}
+
+// 文本截断函数
+const truncateText = (text: string, maxLength: number): string => {
+  if (!text) return ''
+  let msg = text
+  if (msg.startsWith('THOUGHT:')) {
+    msg = msg.replace('THOUGHT:', '').trim()
+  }
+  if (msg.length <= maxLength) return msg
+  return msg.substring(0, maxLength) + '...'
+}
 
 const interestOptions = [
   { label: '历史文化', value: 'history' },
@@ -1280,374 +1741,965 @@ textarea {
 /* ============ Agent Panel ============ */
 
 .agent-panel {
-  width: 380px;
-  min-width: 380px;
+  width: 420px;
+  min-width: 420px;
   height: 100dvh;
-  border-left: 1px solid rgba(51, 133, 255, 0.1);
-  background: linear-gradient(180deg, #ffffff 0%, #FAFCFF 100%);
+  border-left: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.03);
 }
 
-.agent-panel-header {
+/* --- Head --- */
+
+.ap-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 20px 20px 16px;
-  border-bottom: 1px solid rgba(51, 133, 255, 0.08);
+  padding: 18px 22px;
+  border-bottom: 1px solid #f1f5f9;
+  flex-shrink: 0;
+  background: #fff;
 }
 
-.agent-panel-icon {
-  font-size: 22px;
+.ap-head-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
-.agent-panel-header span:nth-child(2) {
-  font-size: 16px;
-  font-weight: 700;
-  color: #1E3A5F;
-  flex: 1;
+.ap-head-dot.pulse {
+  background: #3b82f6;
+  animation: ap-pulse 1.5s ease-in-out infinite;
 }
 
-.agent-panel-badge {
-  padding: 4px 10px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
+.ap-head-dot.idle { background: #cbd5e1; }
+.ap-head-dot.done { background: #22c55e; }
+
+@keyframes ap-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(59,130,246,0.4); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 8px rgba(59,130,246,0); }
 }
 
-.agent-panel-badge.active {
-  background: #E8FFF0;
-  color: #00A854;
-  animation: badge-pulse 2s infinite;
-}
-
-.agent-panel-badge.idle {
-  background: #F0F4F8;
-  color: #6B8CBE;
-}
-
-.agent-panel-badge.done {
-  background: #DBEAFE;
-  color: #1E40AF;
-}
-
-.agent-log-stream.readonly {
-  overflow-y: auto;
-}
-
-.agent-summary-card {
-  padding: 4px 0;
-}
-
-.summary-title {
+.ap-head-title {
   font-size: 14px;
-  font-weight: 700;
-  color: #1E3A5F;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(51, 133, 255, 0.08);
-}
-
-.summary-stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-
-.summary-stat {
-  background: #FAFCFF;
-  border-radius: 10px;
-  padding: 12px;
-  border: 1px solid rgba(51, 133, 255, 0.06);
-}
-
-.summary-stat-label {
-  display: block;
-  font-size: 11px;
-  color: #94A3B8;
-  margin-bottom: 4px;
-  font-weight: 500;
-}
-
-.summary-stat-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: #1E3A5F;
-}
-
-.summary-section {
-  margin-top: 16px;
-}
-
-.summary-section-title {
-  font-size: 13px;
   font-weight: 600;
-  color: #6B8CBE;
-  margin-bottom: 10px;
+  color: #1e293b;
+  letter-spacing: -0.01em;
 }
 
-.summary-empty {
-  font-size: 13px;
-  color: #94A3B8;
-  margin: 0;
+/* --- Progress Bar --- */
+
+.ap-progress-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+  position: relative;
+  flex-shrink: 0;
 }
 
-.log-row.mini .phase-banner {
-  font-size: 12px;
-  padding: 6px 10px;
+.ap-progress-segment {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 1;
 }
 
-.log-row.mini .thought-bubble {
-  font-size: 12px;
-  padding: 8px 10px;
-}
-
-.log-row.mini .thought-text {
-  font-size: 12px;
-}
-
-@keyframes badge-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-.phase-indicator {
-  padding: 16px 20px 0;
-}
-
-.phase-steps {
+.ap-progress-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #e2e8f0;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  transition: all 0.3s ease;
 }
 
-.phase-step {
+.ap-progress-segment.active .ap-progress-dot {
+  background: #3b82f6;
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(59,130,246,0.15), 0 2px 8px rgba(59,130,246,0.3);
+  animation: ap-dot-glow 2s ease-in-out infinite;
+}
+
+.ap-progress-segment.done .ap-progress-dot {
+  background: #22c55e;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(34,197,94,0.25);
+}
+
+@keyframes ap-dot-glow {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(59,130,246,0.15), 0 2px 8px rgba(59,130,246,0.3); }
+  50% { box-shadow: 0 0 0 6px rgba(59,130,246,0.1), 0 2px 12px rgba(59,130,246,0.4); }
+}
+
+.ap-progress-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+  transition: color 0.3s;
+}
+
+.ap-progress-segment.active .ap-progress-label { color: #3b82f6; font-weight: 600; }
+.ap-progress-segment.done .ap-progress-label { color: #22c55e; }
+
+.ap-progress-line {
+  position: absolute;
+  left: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 3px;
+  background: linear-gradient(90deg, #22c55e, #3b82f6);
+  border-radius: 2px;
+  transition: width 0.6s ease;
+  z-index: 0;
+  margin-top: -12px;
+}
+
+/* --- Action Bar (current action spotlight) --- */
+
+.ap-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 22px;
+  background: linear-gradient(90deg, #eff6ff, #f0fdf4);
+  border-bottom: 1px solid #dbeafe;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.ap-action-icon {
+  color: #3b82f6;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ap-action-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1e40af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.ap-action-bar-shimmer {
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  animation: ap-shimmer 2.5s ease-in-out infinite;
+}
+
+@keyframes ap-shimmer {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* --- Body (scroll area) --- */
+
+.ap-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 22px;
   display: flex;
   flex-direction: column;
+  gap: 2px;
+}
+
+.ap-body::-webkit-scrollbar { width: 4px; }
+.ap-body::-webkit-scrollbar-track { background: transparent; }
+.ap-body::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 2px; }
+
+/* --- Group (phase section) --- */
+
+.ap-group {
+  margin-bottom: 6px;
+}
+
+.ap-phase-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.15s;
+  border-radius: 6px;
+}
+
+.ap-phase-row:hover {
+  background: #f8fafc;
+}
+
+.ap-phase-row.done .ap-phase-name { color: #16a34a; }
+
+.ap-phase-node {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  transition: all 0.2s;
+}
+
+.ap-phase-node.active {
+  background: #eff6ff;
+  color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+}
+
+.ap-node-check {
+  font-size: 11px;
+  color: #22c55e;
+}
+
+.ap-node-num {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ap-phase-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.ap-phase-count {
+  font-size: 10px;
+  color: #94a3b8;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.ap-phase-arrow {
+  font-size: 16px;
+  color: #94a3b8;
+  transition: transform 0.2s;
+  line-height: 1;
+}
+
+.ap-phase-arrow.open {
+  transform: rotate(90deg);
+}
+
+/* --- Phase body (entries) --- */
+
+.ap-phase-body {
+  padding: 4px 0 8px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 2px solid #e2e8f0;
+  margin-left: 11px;
+}
+
+.ap-entry { line-height: 1.5; }
+
+/* --- Thought (rich card style) --- */
+
+.ap-thought {
+  display: flex;
+  gap: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #fafbff;
+  border: 1px solid #eef2ff;
+  overflow: hidden;
+}
+
+.ap-thought:hover {
+  border-color: #c7d2fe;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.08);
+}
+
+.ap-thought-bar {
+  width: 3px;
+  background: linear-gradient(180deg, #818cf8, #6366f1);
+  flex-shrink: 0;
+  border-radius: 3px 0 0 3px;
+}
+
+.ap-thought-inner {
+  flex: 1;
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.ap-thought-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.ap-thought-icon {
+  color: #818cf8;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ap-thought-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #6366f1;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.ap-thought-toggle {
+  font-size: 10px;
+  color: #818cf8;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(99,102,241,0.08);
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.ap-thought-toggle:hover {
+  background: rgba(99,102,241,0.15);
+}
+
+.ap-thought-brief {
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.ap-thought-full {
+  font-size: 12.5px;
+  color: #475569;
+  line-height: 1.7;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.ap-thought-full strong { color: #334155; font-weight: 600; }
+.ap-thought-full code {
+  background: #eef2ff;
+  color: #6366f1;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 11px;
+}
+
+.ap-thought.collapsed {
+  background: #f8fafc;
+  border-color: #f1f5f9;
+}
+
+.ap-thought.collapsed .ap-thought-bar {
+  background: #cbd5e1;
+}
+
+.ap-thought.collapsed .ap-thought-brief {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* --- Tool --- */
+
+.ap-tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #475569;
+  background: #fff;
+  border: 1px solid #f1f5f9;
+  transition: background 0.15s;
+}
+
+.ap-tool:hover {
+  background: #f8fafc;
+}
+
+.ap-tool-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ap-tool-dot.status-success { background: #22c55e; box-shadow: 0 0 4px rgba(34,197,94,0.3); }
+.ap-tool-dot.status-running { background: #3b82f6; animation: ap-pulse 1.5s ease-in-out infinite; }
+.ap-tool-dot.status-skipped { background: #f59e0b; }
+
+.ap-tool-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.ap-tool-name {
+  flex: 1;
+  font-weight: 500;
+  color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-tool-status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.ap-tool-status.status-success { background: #f0fdf4; color: #16a34a; }
+.ap-tool-status.status-running { background: #eff6ff; color: #2563eb; }
+.ap-tool-status.status-skipped { background: #fffbeb; color: #d97706; }
+
+/* --- Cursor --- */
+
+.ap-cursor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 0;
+  margin-top: 6px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.ap-cursor-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3b82f6;
+  animation: ap-blink 1s step-end infinite;
+}
+
+@keyframes ap-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.ap-cursor-text {
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Stats Bar --- */
+
+.ap-stats-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px 22px;
+  border-top: 1px solid #f1f5f9;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.ap-stats-item {
+  font-size: 11px;
+  color: #94a3b8;
+  display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.phase-dot {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.ap-stats-num {
   font-weight: 700;
+  color: #64748b;
   font-size: 13px;
+}
+
+.ap-stats-divider {
+  width: 1px;
+  height: 14px;
   background: #e2e8f0;
-  color: #94a3b8;
-  transition: all 0.3s;
 }
 
-.phase-step.active .phase-dot {
-  background: #3385FF;
-  color: #fff;
-  box-shadow: 0 0 0 4px rgba(51, 133, 255, 0.2);
-  animation: pulse-dot 1.5s infinite;
-}
+/* --- Empty state --- */
 
-.phase-step.done .phase-dot {
-  background: #10b981;
-  color: #fff;
-}
-
-.phase-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #94a3b8;
-}
-
-.phase-step.active .phase-label,
-.phase-step.done .phase-label {
-  color: #1E3A5F;
-}
-
-.phase-line {
-  width: 44px;
-  height: 2px;
-  background: #e2e8f0;
-  margin-bottom: 16px;
-  transition: all 0.3s;
-}
-
-.phase-line.filled {
-  background: #10b981;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(51, 133, 255, 0.2); }
-  50% { box-shadow: 0 0 0 8px rgba(51, 133, 255, 0.1); }
-}
-
-.agent-log-stream {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.log-row {
-  animation: slideIn 0.3s ease-out;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.phase-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(51, 133, 255, 0.06);
-  border-left: 3px solid #3385FF;
-  font-weight: 600;
-  font-size: 13px;
-  color: #1E3A5F;
-}
-
-.phase-banner.phase-done {
-  background: rgba(16, 185, 129, 0.06);
-  border-left-color: #10b981;
-  color: #065f46;
-}
-
-.phase-icon {
-  font-size: 14px;
-}
-
-.thought-bubble {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(139, 92, 246, 0.05);
-  border: 1px dashed rgba(139, 92, 246, 0.15);
-  margin-left: 6px;
-}
-
-.thought-bubble .thought-icon {
-  font-size: 16px;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
-.thought-bubble .thought-text {
-  font-size: 13px;
-  line-height: 1.5;
-  color: #4c1d95;
-}
-
-.tool-call-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  background: #fff;
-  margin-left: 6px;
-  font-size: 12px;
-  color: #6B8CBE;
-}
-
-.tool-call-row .tool-icon {
-  font-size: 14px;
-}
-
-.stream-cursor {
-  color: #3385FF;
-  font-size: 14px;
-  animation: blink 1s infinite;
-}
-
-@keyframes blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
-}
-
-.agent-panel-empty {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #94A3B8;
-  font-size: 14px;
-}
-
-.agent-panel-idle-content {
+.ap-empty {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 24px;
+  gap: 16px;
+}
+
+.ap-empty-ring {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ap-empty-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid #e2e8f0;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.ap-empty-text {
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+/* --- Idle state --- */
+
+.ap-idle {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 28px;
   text-align: center;
 }
 
-.idle-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
+.ap-idle-robot {
+  opacity: 0.35;
+  margin-bottom: 8px;
 }
 
-.agent-panel-idle-content p {
-  font-size: 14px;
-  color: #6B8CBE;
-  line-height: 1.8;
+.ap-idle-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 4px;
 }
 
-.agent-panel-idle-content strong {
-  color: #3385FF;
+.ap-idle-hint {
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.7;
+  margin-bottom: 20px;
 }
 
-.tool-call-list {
+.ap-idle-hint strong {
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.ap-idle-features {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
+  width: 100%;
+  max-width: 260px;
 }
 
-.tool-call-item {
+.ap-idle-feat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #f1f5f9;
+  font-size: 12px;
+  color: #64748b;
+  text-align: left;
+}
+
+.ap-idle-feat-icon {
+  color: #94a3b8;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* ============ Done State ============ */
+
+.ap-done-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #f1f5f9;
+  margin-bottom: 18px;
+}
+
+.ap-metric {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 14px 12px;
+  text-align: center;
+  border: 1px solid #f1f5f9;
+  position: relative;
+}
+
+.ap-metric-icon {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: #cbd5e1;
+  display: flex;
+}
+
+.ap-metric-val {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.2;
+}
+
+.ap-metric-label {
+  display: block;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 3px;
+  font-weight: 500;
+}
+
+.ap-done-section {
+  margin-bottom: 18px;
+}
+
+.ap-done-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0 10px;
+}
+
+.ap-done-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ap-done-section-badge {
+  font-size: 10px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #64748b;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.ap-done-toggle {
+  font-size: 11px;
+  color: #3b82f6;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.ap-done-toggle:hover {
+  background: #eff6ff;
+}
+
+/* --- Token Bar --- */
+
+.ap-token-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  display: flex;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.ap-token-segment {
+  height: 100%;
+  transition: width 0.5s ease;
+}
+
+.ap-token-segment.prompt {
+  background: linear-gradient(90deg, #60a5fa, #3b82f6);
+  border-radius: 4px 0 0 4px;
+}
+
+.ap-token-segment.completion {
+  background: linear-gradient(90deg, #a78bfa, #7c3aed);
+  border-radius: 0 4px 4px 0;
+}
+
+.ap-token-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.ap-token-item {
+  font-size: 11px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ap-token-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.ap-token-dot.prompt { background: #3b82f6; }
+.ap-token-dot.completion { background: #7c3aed; }
+.ap-token-dot.total { background: #94a3b8; border-radius: 50%; }
+
+/* --- Done tools list --- */
+
+.ap-done-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.ap-done-tool {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  background: #FAFCFF;
-  border-radius: 8px;
-  border: 1px solid rgba(51, 133, 255, 0.06);
+  padding: 5px 10px;
+  border-radius: 6px;
   font-size: 12px;
+  color: #475569;
+  border: 1px solid #f1f5f9;
+  background: #fff;
 }
 
-.tool-call-status {
-  font-weight: 700;
+.ap-done-tool-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-tool-stats-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.ap-tool-stat {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+}
+
+.ap-tool-stat.success { background: #f0fdf4; color: #16a34a; }
+.ap-tool-stat.skipped { background: #fffbeb; color: #d97706; }
+
+/* --- Done timeline --- */
+
+.ap-done-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  padding-left: 16px;
+}
+
+.ap-done-timeline::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  background: linear-gradient(180deg, #e2e8f0, #f1f5f9);
+  border-radius: 1px;
+}
+
+.ap-done-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 8px 0;
+  position: relative;
+}
+
+.ap-done-step-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  margin-top: 2px;
+}
+
+.ap-done-step-dot.done {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34,197,94,0.12);
+}
+
+.ap-done-step-name {
   font-size: 12px;
+  color: #94a3b8;
   flex-shrink: 0;
 }
 
-.tool-call-status.status-ok {
-  color: #10b981;
+.ap-done-step.done .ap-done-step-name {
+  color: #475569;
+  font-weight: 600;
 }
 
-.tool-call-status.status-fail {
-  color: #ef4444;
+.ap-done-step-msg {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.5;
+  min-width: 0;
 }
 
-.tool-call-name {
-  color: #1E3A5F;
-  font-weight: 500;
+/* --- Done full log --- */
+
+.ap-done-fulllog {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
+
+.ap-done-fulllog::-webkit-scrollbar { width: 3px; }
+.ap-done-fulllog::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 2px; }
+
+.ap-done-log-phase {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  background: #f8fafc;
+  border-radius: 6px;
+  margin-top: 6px;
+  border: 1px solid #f1f5f9;
+}
+
+.ap-done-log-icon {
+  font-size: 11px;
+  color: #22c55e;
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+.ap-done-log-thought {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 10px 4px 30px;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.ap-done-log-prefix {
+  font-size: 9px;
+  font-weight: 700;
+  color: #818cf8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  background: #eef2ff;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.ap-done-log-tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px 3px 30px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.ap-done-empty {
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: center;
+  padding: 24px 0;
+}
+
+/* ============ Transitions ============ */
+
+.ap-slide-enter-active,
+.ap-slide-leave-active {
+  transition: all 0.25s ease;
+  overflow: hidden;
+}
+
+.ap-slide-enter-from,
+.ap-slide-leave-to {
+  opacity: 0;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.ap-slide-enter-to,
+.ap-slide-leave-from {
+  opacity: 1;
+  max-height: 2000px;
+}
+
 </style>
