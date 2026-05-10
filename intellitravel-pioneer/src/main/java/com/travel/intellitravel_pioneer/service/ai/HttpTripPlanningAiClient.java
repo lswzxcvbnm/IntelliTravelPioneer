@@ -33,34 +33,34 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
     private final ObjectMapper objectMapper;
 
-    @Value("${trip.ai.provider:llm}")
+    @Value("${trip.ai.provider}")
     private String aiProvider;
 
-    @Value("${trip.ai.base-url:}")
+    @Value("${trip.ai.base-url}")
     private String aiBaseUrl;
 
-    @Value("${trip.ai.plan-path:/api/trips/plan}")
+    @Value("${trip.ai.plan-path}")
     private String aiPlanPath;
 
-    @Value("${trip.ai.status-analysis-path:/api/trips/status/analyze}")
+    @Value("${trip.ai.status-analysis-path}")
     private String aiStatusAnalysisPath;
 
-    @Value("${trip.ai.llm.base-url:https://api.siliconflow.cn}")
+    @Value("${trip.ai.llm.base-url}")
     private String llmBaseUrl;
 
-    @Value("${trip.ai.llm.chat-path:/v1/chat/completions}")
+    @Value("${trip.ai.llm.chat-path}")
     private String llmChatPath;
 
-    @Value("${trip.ai.llm.api-key:}")
+    @Value("${trip.ai.llm.api-key}")
     private String llmApiKey;
 
-    @Value("${trip.ai.llm.model:Qwen/Qwen3-8B}")
+    @Value("${trip.ai.llm.model}")
     private String llmModel;
 
-    @Value("${trip.ai.llm.temperature:0.2}")
+    @Value("${trip.ai.llm.temperature}")
     private Double llmTemperature;
 
-    @Value("${trip.ai.amap.mcp-url:https://mcp.amap.com/sse?key=bc02d1f93e142eb512f2a9d058d32560}")
+    @Value("${trip.ai.amap.mcp-url}")
     private String amapMcpUrl;
 
     public HttpTripPlanningAiClient(ObjectMapper objectMapper) {
@@ -732,6 +732,9 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     ? message.get("content").asText() : "";
             if (!content.isBlank()) {
                 assistantMsg.put("content", content);
+            }
+            if (message.has("reasoning_content") && !message.get("reasoning_content").isNull()) {
+                assistantMsg.put("reasoning_content", message.get("reasoning_content").asText());
             }
             if (message.has("tool_calls")) {
                 assistantMsg.put("tool_calls", message.get("tool_calls"));
@@ -1605,6 +1608,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             }
 
             StringBuilder contentBuilder = new StringBuilder();
+            StringBuilder reasoningBuilder = new StringBuilder();
             String[] lines = response.body().split("\\r?\\n");
             for (String line : lines) {
                 String trimmed = line.trim();
@@ -1621,6 +1625,9 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                             if (delta.has("content") && !delta.get("content").isNull()) {
                                 contentBuilder.append(delta.get("content").asText());
                             }
+                            if (delta.has("reasoning_content") && !delta.get("reasoning_content").isNull()) {
+                                reasoningBuilder.append(delta.get("reasoning_content").asText());
+                            }
                         }
                     } catch (Exception ignored) {
                     }
@@ -1628,7 +1635,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             }
 
             String fullContent = contentBuilder.toString();
-            if (fullContent.isBlank()) {
+            if (fullContent.isBlank() && reasoningBuilder.isEmpty()) {
                 throw new IntellitravelException("AI 流式响应未产生任何内容");
             }
 
@@ -1639,6 +1646,9 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             ObjectNode msg = choice.putObject("message");
             msg.put("role", "assistant");
             msg.put("content", fullContent);
+            if (!reasoningBuilder.isEmpty()) {
+                msg.put("reasoning_content", reasoningBuilder.toString());
+            }
             choice.put("finish_reason", "stop");
 
             return responseNode;

@@ -19,7 +19,7 @@ public class TokenUtil {
     private final Algorithm algorithm;
 
     public TokenUtil(UserRepository userRepository,
-                     @Value("${jwt.secret:IntelliTravel-Pioneer-JWT-Secret-Key-2026}") String jwtSecret) {
+                     @Value("${jwt.secret}") String jwtSecret) {
         this.userRepository = userRepository;
         this.algorithm = Algorithm.HMAC256(jwtSecret);
     }

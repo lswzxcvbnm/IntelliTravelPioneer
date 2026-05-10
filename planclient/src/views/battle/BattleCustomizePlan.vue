@@ -1,4 +1,4 @@
-﻿<template>
+﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="customize-shell">
     <div class="customize-main">
       <header class="top-bar">
@@ -48,7 +48,6 @@
           </div>
           <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
           <div class="form-actions">
-            <button class="secondary" @click="jumpToExisting" v-if="isEditMode">加载已有</button>
             <button class="primary" @click="handleGenerate" :disabled="isLoadingGenerate">
               {{ isLoadingGenerate ? '正在生成...' : '✨ 生成 AI 方案' }}
             </button>
@@ -56,40 +55,79 @@
         </section>
 
         <section class="card" v-if="step === 2">
-          <h2>方案编辑</h2>
-          <p class="hint">你可以自行增添，删除或调整行程，或者将你的想法告诉AI，让它帮你完善行程。</p>
           <div v-if="!editablePlan" class="empty">尚未生成或加载方案。</div>
           <template v-else>
-            <div class="ai-refine-box">
-              <label>
-                <strong class="ai-refine-title">AI 行程完善</strong>
-                <textarea v-model="refinePrompt" rows="3"
-                  placeholder="告诉AI你想如何修改，例如：'把第一天的景点换成室内的'、'晚餐都安排在酒店附近'" />
-              </label>
-              <div class="actions ai-refine-actions">
-                <button class="primary mini" @click="handleAiRefine" :disabled="isRefining || !refinePrompt.trim()">
-                  {{ isRefining ? 'AI 修改中...' : '发送给 AI 进行修改' }}
+
+            <div class="edit-plan-header">
+              <div class="eph-left">
+                <h2 class="eph-title-wrap">
+                  <input class="eph-title" v-model.trim="editablePlan.title" placeholder="给你的行程起个名字" />
+                </h2>
+                <div class="eph-meta">
+                  <span class="eph-tag">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    {{ editablePlan.totalDays }} 天行程
+                  </span>
+                  <span class="eph-tag">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                    预算 ¥{{ formatCurrency(editablePlan.estimatedCost || 0).replace('￥', '') }}
+                  </span>
+                  <span class="eph-tag eph-tag-route">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+                    {{ routeItemCount }} 个路线项
+                  </span>
+                </div>
+              </div>
+              <div class="eph-actions">
+                 <button class="secondary eph-btn" @click="handleGoBackToStep1">
+                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                   返回需求
+                 </button>
+                <button class="primary eph-btn eph-save" @click="savePlan" :disabled="isSaving">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                  {{ isSaving ? '保存中...' : isEditMode ? '更新方案' : '保存方案' }}
                 </button>
               </div>
             </div>
-            <label>计划标题 <input v-model.trim="editablePlan.title" placeholder="请输入计划标题" /></label>
-            <div class="form-grid compact">
-              <label>预计花费 <input v-model.number="editablePlan.estimatedCost" type="number" min="0" /></label>
-              <label>总天数 <input v-model.number="editablePlan.totalDays" type="number" min="1" max="30" /></label>
+
+            <div class="ai-refine-box">
+              <div class="ai-refine-header">
+                <span class="ai-refine-badge">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0110 10c0 5.52-4.48 10-10 10S2 17.52 2 12"/><path d="m12 12-.5-8"/></svg>
+                  AI 智能优化
+                </span>
+                <span class="ai-refine-hint">描述你的修改意图，AI 将自动调整行程</span>
+              </div>
+              <textarea v-model="refinePrompt" rows="2"
+                placeholder="例如：把第一天的景点换成室内的、晚餐都安排在酒店附近、增加一个博物馆..." />
+              <div class="ai-refine-actions">
+                <button class="primary mini ai-send-btn" @click="handleAiRefine" :disabled="isRefining || !refinePrompt.trim()">
+                  {{ isRefining ? 'AI 思考中...' : '发送给 AI' }}
+                </button>
+              </div>
             </div>
+
             <div class="timeline-view">
-              <div class="day-section" v-for="day in editablePlan.dailyPlans" :key="day.dayNumber"
+              <div class="day-section" v-for="(day, di) in editablePlan.dailyPlans" :key="day.dayNumber"
                 @dragover.prevent @drop="onDayDrop(day.dayNumber)">
-                <div class="day-sticky-header">
-                  <div class="day-badge-pill">
-                    <span class="day-num">DAY {{ day.dayNumber }}</span>
+                <div class="day-header-card">
+                  <div class="day-header-left">
+                    <div class="day-index-badge">{{ day.dayNumber }}</div>
+                    <div class="day-header-info">
+                      <span class="day-header-label">第 {{ day.dayNumber }} 天</span>
+                      <span class="day-header-sub">{{ day.items.length }} 个地点 · {{ day.items.filter(i => i.type === '美食').length }} 餐饮 · {{ day.items.filter(i => i.type === '住宿').length }} 住宿</span>
+                    </div>
                   </div>
-                  <button class="icon-btn-add" @click="addItem(day.dayNumber)">+</button>
+                  <button class="btn-add-item" @click="addItem(day.dayNumber)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    添加
+                  </button>
                 </div>
                 <div class="timeline-list">
                   <div class="timeline-row" v-for="(item, idx) in day.items" :key="`${day.dayNumber}-${idx}`"
                     draggable="true" @dragstart="onDragStart(day.dayNumber, idx)"
-                    @dragover.prevent @drop.stop="onDrop(day.dayNumber, idx)">
+                    @dragover.prevent @drop.stop="onDrop(day.dayNumber, idx)"
+                    :class="`type-border-${getTypeClass(item.type)}`">
                     <div class="timeline-thread">
                       <div class="node-circle" :class="`bg-${getTypeClass(item.type)}`">{{ getTypeIcon(item.type) }}</div>
                     </div>
@@ -98,6 +136,7 @@
                         <div class="card-header-row">
                           <div class="card-info">
                             <div class="card-title-row">
+                              <span class="card-type-tag" :class="`tag-${getTypeClass(item.type)}`">{{ item.type }}</span>
                               <div class="card-title">{{ item.name || '未命名路线项' }}</div>
                               <button v-if="hasLocation(item)" class="map-link-btn" @click="openMap(item)" title="在地图中查看">
                                 📍 地图
@@ -131,15 +170,12 @@
                       </div>
                     </div>
                   </div>
-                  <div v-if="day.items.length === 0" class="empty-day-placeholder">拖拽或点击+号添加行程</div>
+                  <div v-if="day.items.length === 0" class="empty-day-placeholder">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                    <span>点击上方「添加」按钮或拖拽来安排今日行程</span>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div class="form-actions">
-              <button class="secondary" @click="step = 1">返回上一页</button>
-              <button class="primary" @click="savePlan" :disabled="!editablePlan || isSaving">
-                {{ isSaving ? '保存中...' : isEditMode ? '更新方案' : '保存方案' }}
-              </button>
             </div>
           </template>
         </section>
@@ -586,9 +622,9 @@ watch(
 watch(currentAgentPhase, (newPhase, oldPhase) => {
   if (newPhase !== oldPhase && oldPhase) {
     const newExpanded = new Set(expandedGroups.value)
-    const oldGroup = oldPhase.replace(/_START|_END/, '')
+    const oldGroup = oldPhase.replace(/_START$|_END$/, '')
     newExpanded.delete(oldGroup)
-    const newGroup = newPhase.replace(/_START|_END/, '')
+    const newGroup = newPhase.replace(/_START$|_END$/, '')
     newExpanded.add(newGroup)
     expandedGroups.value = newExpanded
   }
@@ -661,26 +697,24 @@ interface PhaseGroup {
 
 const groupedLogs = computed((): PhaseGroup[] => {
   const logs = activeAgentLogs.value
-  const groups: PhaseGroup[] = []
+  const groupMap = new Map<string, LogEntry[]>()
+  const phaseOrder: string[] = []
   let currentPhase = 'INIT'
-  let currentEntries: LogEntry[] = []
 
   for (const entry of logs) {
     if (entry.type === 'phase') {
-      if (currentEntries.length > 0) {
-        groups.push({ phase: currentPhase, entries: currentEntries })
-        currentEntries = []
-      }
-      currentPhase = entry.phaseType?.replace(/_START|_END/, '') || 'UNKNOWN'
+      currentPhase = entry.phaseType?.replace(/_START$|_END$/, '') || 'UNKNOWN'
     }
-    currentEntries.push(entry)
+    if (!groupMap.has(currentPhase)) {
+      groupMap.set(currentPhase, [])
+      phaseOrder.push(currentPhase)
+    }
+    groupMap.get(currentPhase)!.push(entry)
   }
 
-  if (currentEntries.length > 0) {
-    groups.push({ phase: currentPhase, entries: currentEntries })
-  }
-
-  return groups
+  return phaseOrder
+    .map(phase => ({ phase, entries: groupMap.get(phase)! }))
+    .filter(group => group.entries.some(e => e.type === 'thought' || e.type === 'tool'))
 })
 
 const toggleGroupExpand = (phase: string) => {
@@ -1011,6 +1045,17 @@ const mergeRefinedPlan = (original: ItineraryPlan, refined: ItineraryPlan): Itin
 }
 
 const handleGenerate = async () => {
+  if (editablePlan.value) {
+    try {
+      await ElMessageBox.confirm(
+        '当前已有编辑中的行程方案，重新生成将覆盖现有内容。是否继续？',
+        '确认重新生成',
+        { confirmButtonText: '重新生成', cancelButtonText: '取消', type: 'warning' }
+      )
+    } catch {
+      return
+    }
+  }
   errorMessage.value = ''
   generatingLogs.value = []
   currentPhase.value = ''
@@ -1028,6 +1073,20 @@ const handleGenerate = async () => {
       (stats) => { generationStats.value = stats }
     )
   } catch (error: any) { errorMessage.value = '生成失败，请稍后重试。'; isLoadingGenerate.value = false }
+}
+
+const handleGoBackToStep1 = async () => {
+  if (!editablePlan.value) { step.value = 1; return }
+  try {
+    await ElMessageBox.confirm(
+      '返回后将离开当前编辑页面，未保存的修改可能丢失。建议先保存方案。',
+      '确认返回',
+      { confirmButtonText: '继续返回', cancelButtonText: '留下编辑', type: 'info' }
+    )
+  } catch {
+    return
+  }
+  step.value = 1
 }
 
 const handleAiRefine = async () => {
@@ -1100,7 +1159,6 @@ const onDayDrop = (tdn: number) => {
   draggingItem.value = null
 }
 
-const jumpToExisting = () => { if (isEditMode.value) loadDetailForEdit() }
 const loadDetailForEdit = async () => {
   if (!itineraryId.value) return
   isLoadingGenerate.value = true; errorMessage.value = ''
@@ -1207,10 +1265,92 @@ onMounted(async () => {
 }
 
 .card h2 {
-  margin: 0 0 20px;
+  margin: 0;
   font-size: 18px;
   font-weight: 700;
   color: #1E3A5F;
+}
+
+.edit-plan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 20px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(51, 133, 255, 0.08);
+}
+
+.eph-left {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.eph-title-wrap { margin: 0; }
+
+.eph-title {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  font-size: 22px;
+  font-weight: 800;
+  color: #1E3A5F;
+  outline: none;
+  border-radius: 6px;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.eph-title::placeholder { color: #B8C9E0; font-weight: 600; }
+.eph-title:focus {
+  background: rgba(51, 133, 255, 0.04);
+  box-shadow: 0 0 0 3px rgba(51, 133, 255, 0.08);
+}
+
+.eph-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.eph-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.eph-tag svg { color: #94a3b8; }
+
+.eph-tag-route {
+  color: #3385FF;
+  background: #F0F7FF;
+  border-color: rgba(51, 133, 255, 0.12);
+}
+
+.eph-tag-route svg { color: #3385FF; }
+
+.eph-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.eph-btn {
+  padding: 10px 18px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .form-cols {
@@ -1250,6 +1390,12 @@ onMounted(async () => {
   font-weight: 700;
   color: #1E3A5F;
   width: 100%;
+  outline: none;
+}
+
+.large-input:focus {
+  background: rgba(51, 133, 255, 0.03);
+  border-radius: 6px;
 }
 
 .stepper {
@@ -1350,7 +1496,10 @@ textarea {
   color: #1E3A5F;
   font-size: 14px;
   line-height: 1.6;
+  outline: none;
 }
+
+textarea:focus { background: rgba(51, 133, 255, 0.03); border-radius: 6px; }
 
 .input-card:focus-within {
   border-color: #3385FF;
@@ -1434,17 +1583,71 @@ textarea {
 }
 
 .ai-refine-box {
-  background: #F8FBFF;
+  background: #fff;
   border-radius: 14px;
-  padding: 20px;
+  padding: 18px 20px;
   margin-bottom: 24px;
-  border: 1px solid rgba(51, 133, 255, 0.1);
+  border: 1px solid rgba(99,102,241,0.12);
+  box-shadow: 0 1px 6px rgba(99,102,241,0.04);
+}
+
+.ai-refine-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ai-refine-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #6366f1;
+  background: linear-gradient(135deg, #eef2ff, #ede9fe);
+  border: 1px solid rgba(99,102,241,0.15);
+}
+
+.ai-refine-badge svg { color: #6366f1; }
+
+.ai-refine-hint {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.ai-refine-box textarea {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.7;
+  outline: none;
+}
+
+.ai-refine-box textarea::placeholder { color: #c4cdd8; }
+.ai-refine-box textarea:focus {
+  background: rgba(99, 102, 241, 0.03);
+  border-radius: 6px;
 }
 
 .ai-refine-actions {
-  margin-top: 14px;
+  margin-top: 12px;
   display: flex;
   justify-content: flex-end;
+}
+
+.ai-send-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .empty {
@@ -1462,40 +1665,81 @@ textarea {
 }
 
 .day-section {
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 }
 
-.day-sticky-header {
+.day-header-card {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, #fff 0%, #fafbff 100%);
+  border-radius: 12px;
+  padding: 14px 18px;
   margin-bottom: 16px;
+  border: 1px solid rgba(51, 133, 255, 0.08);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.02);
 }
 
-.day-badge-pill {
-  background: #3385FF;
-  color: #fff;
-  padding: 8px 18px;
-  border-radius: 20px;
-  font-weight: 800;
-  font-size: 14px;
-  box-shadow: 0 3px 10px rgba(51, 133, 255, 0.3);
+.day-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.icon-btn-add {
-  background: #fff;
+.day-index-badge {
   width: 36px;
   height: 36px;
-  border-radius: 50%;
-  border: 1px solid rgba(51, 133, 255, 0.15);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #3385FF 0%, #1A6FFF 100%);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #3385FF;
-  font-size: 20px;
-  font-weight: bold;
-  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(51, 133, 255, 0.3);
 }
+
+.day-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.day-header-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1E3A5F;
+}
+
+.day-header-sub {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.btn-add-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px dashed rgba(51, 133, 255, 0.25);
+  background: transparent;
+  color: #3385FF;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-add-item:hover {
+  background: #F0F7FF;
+  border-color: #3385FF;
+  border-style: solid;
+}
+
+.btn-add-item svg { flex-shrink: 0; }
 
 .timeline-list {
   padding-left: 12px;
@@ -1506,29 +1750,51 @@ textarea {
 
 .timeline-row {
   position: relative;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  border-left: 3px solid transparent;
+  transition: all 0.2s;
+}
+
+.type-border-spot { border-left-color: #0284c7; }
+.type-border-food { border-left-color: #ea580c; }
+.type-border-traffic { border-left-color: #7c3aed; }
+.type-border-hotel { border-left-color: #2563eb; }
+.type-border-relax { border-left-color: #16a34a; }
+.type-border-shopping { border-left-color: #db2777; }
+.type-border-default { border-left-color: #94a3b8; }
+
+.timeline-row:hover {
+  box-shadow: 0 4px 16px rgba(51,133,255,0.08);
+  transform: translateY(-1px);
 }
 
 .timeline-thread {
   position: absolute;
   left: -32px;
-  top: 0;
+  top: 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 
 .node-circle {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 16px;
   background: #fff;
   border: 3px solid #F0F4F8;
   z-index: 5;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.timeline-row:hover .node-circle {
+  transform: scale(1.08);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
 .timeline-card-wrap {
@@ -1538,9 +1804,10 @@ textarea {
 .timeline-card {
   background: #fff;
   border-radius: 12px;
-  padding: 16px;
+  padding: 16px 18px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
   border: 1px solid rgba(51, 133, 255, 0.06);
+  transition: box-shadow 0.2s;
 }
 
 .card-header-row {
@@ -1550,11 +1817,34 @@ textarea {
   gap: 12px;
 }
 
+.card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-type-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.tag-spot { background: #e0f2fe; color: #0369a1; }
+.tag-food { background: #ffedd5; color: #c2410c; }
+.tag-traffic { background: #f3e8ff; color: #7c3aed; }
+.tag-hotel { background: #dbeafe; color: #1d4ed8; }
+.tag-relax { background: #dcfce7; color: #15803d; }
+.tag-shopping { background: #fce7f3; color: #be185d; }
+.tag-default { background: #f1f5f9; color: #475569; }
+
 .card-title {
   font-weight: 700;
-  font-size: 15px;
+  font-size: 14px;
   color: #1E3A5F;
-  margin-bottom: 4px;
 }
 
 .card-desc {
@@ -1602,6 +1892,22 @@ textarea {
   font-size: 18px;
 }
 
+.map-link-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #F0F7FF;
+  color: #3385FF;
+  cursor: pointer;
+  border: none;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.map-link-btn:hover {
+  background: #E0EFFF;
+}
+
 .embedded-editor {
   margin-top: 10px;
   background: #FAFCFF;
@@ -1626,6 +1932,13 @@ textarea {
   width: 100%;
   font-family: inherit;
   color: #1E3A5F;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.mini-select:focus, .mini-input:focus, .mini-textarea:focus {
+  border-color: #3385FF;
+  box-shadow: 0 0 0 3px rgba(51, 133, 255, 0.08);
 }
 
 .mini-select {
@@ -1633,13 +1946,18 @@ textarea {
 }
 
 .empty-day-placeholder {
-  font-size: 13px;
-  color: #6B8CBE;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #94a3b8;
   text-align: center;
-  padding: 20px;
+  padding: 28px 20px;
   border: 2px dashed rgba(51, 133, 255, 0.1);
   border-radius: 12px;
   margin-left: 20px;
+  background: #fafcff;
 }
 
 .saved-preview {

@@ -18,19 +18,19 @@ public class HttpAiImageClient implements AiImageClient {
 
     private final ObjectMapper objectMapper;
 
-    @Value("${trip.ai.llm.base-url:https://api.siliconflow.cn}")
+    @Value("${trip.ai.image.base-url}")
     private String baseUrl;
 
-    @Value("${trip.ai.image.path:/v1/images/generations}")
+    @Value("${trip.ai.image.path}")
     private String imagePath;
 
-    @Value("${trip.ai.llm.api-key:}")
+    @Value("${trip.ai.image.api-key}")
     private String apiKey;
 
-    @Value("${trip.ai.image.model:Kwai-Kolors/Kolors}")
+    @Value("${trip.ai.image.model}")
     private String defaultModel;
 
-    @Value("${trip.ai.image.size:1024x1024}")
+    @Value("${trip.ai.image.size}")
     private String defaultSize;
 
     public HttpAiImageClient(ObjectMapper objectMapper) {

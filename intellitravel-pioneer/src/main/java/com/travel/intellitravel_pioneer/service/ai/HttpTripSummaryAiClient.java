@@ -19,28 +19,28 @@ public class HttpTripSummaryAiClient implements TripSummaryAiClient {
 
     private final ObjectMapper objectMapper;
 
-    @Value("${trip.ai.provider:llm}")
+    @Value("${trip.ai.provider}")
     private String aiProvider;
 
-    @Value("${trip.ai.base-url:}")
+    @Value("${trip.ai.base-url}")
     private String aiBaseUrl;
 
-    @Value("${trip.ai.summary-path:/api/trips/summary}")
+    @Value("${trip.ai.summary-path}")
     private String aiSummaryPath;
 
-    @Value("${trip.ai.llm.base-url:http://1.95.125.250:8081}")
+    @Value("${trip.ai.llm.base-url}")
     private String llmBaseUrl;
 
-    @Value("${trip.ai.llm.chat-path:/v1/chat/completions}")
+    @Value("${trip.ai.llm.chat-path}")
     private String llmChatPath;
 
-    @Value("${trip.ai.llm.api-key:}")
+    @Value("${trip.ai.llm.api-key}")
     private String llmApiKey;
 
-    @Value("${trip.ai.llm.model:travelagent67-v2}")
+    @Value("${trip.ai.llm.model}")
     private String llmModel;
 
-    @Value("${trip.ai.llm.temperature:0.2}")
+    @Value("${trip.ai.llm.temperature}")
     private Double llmTemperature;
 
     public HttpTripSummaryAiClient(ObjectMapper objectMapper) {
