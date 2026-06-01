@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
+﻿<template>
   <div class="customize-shell">
     <div class="customize-main">
       <header class="top-bar">
@@ -44,6 +44,23 @@
               <span class="label-text">✏️ 补充说明</span>
               <textarea v-model.trim="request.additionalNotes" rows="3"
                 placeholder="例如：希望每天傍晚安排轻松步行，避开高峰景点" />
+            </div>
+            <div class="input-card full-width" v-if="mySkills.length > 0">
+              <span class="label-text">🧩 启用技能</span>
+              <div class="chips-container">
+                <button v-for="skill in mySkills" :key="skill.id" class="chip-pill chip-skill"
+                  :class="{ active: selectedSkillIds.includes(skill.id) }"
+                  @click="toggleSkill(skill.id)"
+                  :title="skill.description || skill.name">
+                  {{ skill.name }}
+                </button>
+              </div>
+              <div class="skill-hint" v-if="selectedSkillIds.length > 0">
+                已选择 {{ selectedSkillIds.length }} 个技能，Agent 将在规划行程时应用这些专属能力
+              </div>
+              <div class="skill-hint empty" v-else-if="mySkills.length > 0">
+                选择技能后，Agent 将按技能要求定制行程风格
+              </div>
             </div>
           </div>
           <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
@@ -471,6 +488,7 @@ import {
   updateItinerary
 } from '../../api/itinerary'
 import type { ItineraryPlan, ItineraryRequest, PhaseData, GenerationStats, ToolCallRecord } from '../../api/itinerary'
+import { listMySkills, type SkillVO } from '../../api/skill'
 import { goBackByAppRule } from '../../composables/useBackHandler'
 
 const router = useRouter()
@@ -922,8 +940,20 @@ const normalizeRouteType = (v: string) => routeTypeOptions.includes(v) ? v : DEF
 
 const request = reactive<ItineraryRequest>({
   destination: Array.isArray(route.query.destination) ? String(route.query.destination[0] || '') : String(route.query.destination || ''),
-  days: 3, interests: [], budgetLevel: 'medium', additionalNotes: ''
+  days: 3, interests: [], budgetLevel: 'medium', additionalNotes: '', skillIds: []
 })
+
+const mySkills = ref<SkillVO[]>([])
+const selectedSkillIds = ref<string[]>([])
+
+const toggleSkill = (skillId: string) => {
+  const idx = selectedSkillIds.value.indexOf(skillId)
+  if (idx >= 0) {
+    selectedSkillIds.value.splice(idx, 1)
+  } else {
+    selectedSkillIds.value.push(skillId)
+  }
+}
 
 const draggingItem = ref<{ dayNumber: number; index: number } | null>(null)
 const editingItemKey = ref('')
@@ -1062,6 +1092,7 @@ const handleGenerate = async () => {
   generationStats.value = null
   const ve = validateRequest(); if (ve) { errorMessage.value = ve; return }
   isLoadingGenerate.value = true
+  request.skillIds = [...selectedSkillIds.value]
   try {
     await generateItineraryStream(
       { ...request },
@@ -1199,6 +1230,10 @@ const goBackToList = () => { router.push('/battle') }
 onMounted(async () => {
   if (route.query.destination) request.destination = String(route.query.destination)
   if (itineraryId.value) await loadDetailForEdit()
+  try {
+    const r = await listMySkills()
+    if (r.data) mySkills.value = r.data
+  } catch { /* 技能加载失败不影响主流程 */ }
 })
 </script>
 
@@ -1483,6 +1518,30 @@ onMounted(async () => {
   color: #fff;
   transform: translateY(-1px);
   box-shadow: 0 3px 10px rgba(51, 133, 255, 0.3);
+}
+
+.chip-skill {
+  border-style: dashed;
+  border-color: #c0c4cc;
+}
+.chip-skill.active {
+  background: #67C23A;
+  border-style: solid;
+  border-color: #67C23A;
+  box-shadow: 0 3px 10px rgba(103, 194, 58, 0.3);
+}
+
+.skill-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #67C23A;
+  background: #f0f9eb;
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+.skill-hint.empty {
+  color: #909399;
+  background: #f5f7fa;
 }
 
 textarea {

@@ -6,12 +6,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.travel.intellitravel_pioneer.exception.IntellitravelException;
+import com.travel.intellitravel_pioneer.service.SkillService;
 import com.travel.intellitravel_pioneer.service.ToolManagementService;
 import com.travel.intellitravel_pioneer.util.TokenUtil;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryPlan;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryRequest;
 import com.travel.intellitravel_pioneer.vo.trip.GenerationResult;
 import com.travel.intellitravel_pioneer.vo.trip.GenerationStats;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -66,6 +68,9 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
     @Value("${trip.ai.amap.mcp-url}")
     private String amapMcpUrl;
+
+    @Autowired
+    private SkillService skillService;
 
     public HttpTripPlanningAiClient(ObjectMapper objectMapper, ToolManagementService toolManagementService, TokenUtil tokenUtil) {
         this.objectMapper = objectMapper;
@@ -126,8 +131,12 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             List<Map<String, Object>> messages = new ArrayList<>();
             messages.add(Map.of("role", "system", "content", REFINE_SYSTEM_PROMPT));
-            messages.add(Map.of("role", "user", "content",
-                "当前已有行程计划：\n" + currentPlanJson + "\n\n用户修改建议：\n" + userPrompt));
+            String skillContext = skillService.buildSkillContext(request.getSkillIds());
+            String refineUserMessage = "当前已有行程计划：\n" + currentPlanJson + "\n\n用户修改建议：\n" + userPrompt;
+            if (skillContext != null && !skillContext.isBlank()) {
+                refineUserMessage = refineUserMessage + skillContext;
+            }
+            messages.add(Map.of("role", "user", "content", refineUserMessage));
 
             ItineraryPlan refinedPlan;
             int executeRetries = 0;
@@ -705,7 +714,12 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private String buildUserInputJson(ItineraryRequest request) {
         Map<String, Object> input = new HashMap<>();
         input.put("request", request);
-        return toJsonString(input);
+        String baseInput = toJsonString(input);
+        String skillContext = skillService.buildSkillContext(request.getSkillIds());
+        if (skillContext != null && !skillContext.isBlank()) {
+            return baseInput + skillContext;
+        }
+        return baseInput;
     }
 
     private ItineraryPlan runAgentLoop(String token, List<Map<String, Object>> messages, JsonNode tools,

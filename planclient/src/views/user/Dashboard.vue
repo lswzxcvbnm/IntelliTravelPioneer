@@ -22,6 +22,10 @@
               <span class="action-icon">📋</span>
               <span>行程仓库</span>
             </button>
+            <button class="action-btn-secondary" @click="handleProtectedNavigation('/battle/skills')">
+              <span class="action-icon">🧩</span>
+              <span>技能工作台</span>
+            </button>
           </div>
         </div>
       </section>

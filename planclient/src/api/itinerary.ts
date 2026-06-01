@@ -42,6 +42,7 @@ export interface ItineraryRequest {
     interests: string[]
     budgetLevel: string
     additionalNotes: string
+    skillIds?: string[]
 }
 
 export interface ItinerarySaveRequest {
