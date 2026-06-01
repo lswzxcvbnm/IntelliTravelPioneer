@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.travel.intellitravel_pioneer.exception.IntellitravelException;
+import com.travel.intellitravel_pioneer.service.ToolManagementService;
+import com.travel.intellitravel_pioneer.util.TokenUtil;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryPlan;
 import com.travel.intellitravel_pioneer.vo.itinerary.ItineraryRequest;
 import com.travel.intellitravel_pioneer.vo.trip.GenerationResult;
@@ -32,6 +34,8 @@ import java.util.regex.Pattern;
 public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
     private final ObjectMapper objectMapper;
+    private final ToolManagementService toolManagementService;
+    private final TokenUtil tokenUtil;
 
     @Value("${trip.ai.provider}")
     private String aiProvider;
@@ -63,8 +67,10 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     @Value("${trip.ai.amap.mcp-url}")
     private String amapMcpUrl;
 
-    public HttpTripPlanningAiClient(ObjectMapper objectMapper) {
+    public HttpTripPlanningAiClient(ObjectMapper objectMapper, ToolManagementService toolManagementService, TokenUtil tokenUtil) {
         this.objectMapper = objectMapper;
+        this.toolManagementService = toolManagementService;
+        this.tokenUtil = tokenUtil;
     }
 
     @Override
@@ -77,7 +83,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     public GenerationResult generateItineraryWithStats(String token, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier) {
         if (isLlmProvider()) {
-            return callLlmForItinerary(request, toolNotifier);
+            return callLlmForItinerary(token, request, toolNotifier);
         }
 
         Map<String, Object> requestBody = new HashMap<>();
@@ -102,10 +108,10 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         if (!isLlmProvider()) {
             throw new IntellitravelException("非 LLM 模式下暂不支持行程修改");
         }
-        return callLlmForRefine(request, toJsonString(currentPlan), userPrompt, toolNotifier);
+        return callLlmForRefine(token, request, toJsonString(currentPlan), userPrompt, toolNotifier);
     }
 
-    private GenerationResult callLlmForRefine(ItineraryRequest request, String currentPlanJson,
+    private GenerationResult callLlmForRefine(String token, ItineraryRequest request, String currentPlanJson,
             String userPrompt, java.util.function.Consumer<String> toolNotifier) {
         GenerationStats stats = new GenerationStats();
         String amapUrl = amapMcpUrl;
@@ -128,7 +134,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             int maxExecuteRetries = 2;
             while (true) {
                 try {
-                    refinedPlan = runAgentLoop(messages, tools, mcpClient, request, toolNotifier, stats);
+                    refinedPlan = runAgentLoop(token, messages, tools, mcpClient, request, toolNotifier, stats);
                     break;
                 } catch (IntellitravelException ie) {
                     throw ie;
@@ -516,7 +522,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         return db;
     }
 
-    private GenerationResult callLlmForItinerary(ItineraryRequest request,
+    private GenerationResult callLlmForItinerary(String token, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier) {
         GenerationStats stats = new GenerationStats();
         String amapUrl = amapMcpUrl;
@@ -622,7 +628,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 messages.add(Map.of("role", "user", "content", userInput));
 
                 try {
-                    draftPlan = runAgentLoop(messages, tools, agentMcpClient, request, toolNotifier, stats);
+                    draftPlan = runAgentLoop(token, messages, tools, agentMcpClient, request, toolNotifier, stats);
                     break;
                 } catch (IntellitravelException ie) {
                     throw ie;
@@ -702,11 +708,24 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         return toJsonString(input);
     }
 
-    private ItineraryPlan runAgentLoop(List<Map<String, Object>> messages, JsonNode tools,
+    private ItineraryPlan runAgentLoop(String token, List<Map<String, Object>> messages, JsonNode tools,
             AmapMcpClient mcpClient, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier, GenerationStats stats) throws Exception {
         int maxTurns = 10;
         boolean mcpUnavailable = (mcpClient == null);
+        
+        // 获取用户ID用于工具偏好检查
+        String userId = null;
+        try {
+            if (token != null && !token.isBlank()) {
+                var user = tokenUtil.getUser(token);
+                if (user != null) {
+                    userId = String.valueOf(user.getId());
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to extract user ID from token: " + e.getMessage());
+        }
 
         if (mcpUnavailable) {
             System.out.println("⚠️ Agent循环运行在无MCP模式，将只使用内置工具");
@@ -765,6 +784,28 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     }
                     args = repairedArgs;
 
+                    // 检查用户是否禁用了该工具
+                    if (userId != null) {
+                        boolean toolEnabled = toolManagementService.isToolEnabledForUser(userId, name);
+                        if (!toolEnabled) {
+                            System.out.println("Tool " + name + " is disabled for user " + userId + ", skipping...");
+                            if (toolNotifier != null) {
+                                toolNotifier.accept("THOUGHT:工具 [" + toolDisplayName(name) + "] 已被用户禁用，跳过调用。");
+                            }
+                            // 记录工具被跳过的情况
+                            toolManagementService.recordToolCall(userId, name, toolDisplayName(name),
+                                null, args, "该工具已被用户禁用，跳过调用", true);
+                            
+                            Map<String, Object> toolMsg = new HashMap<>();
+                            toolMsg.put("role", "tool");
+                            toolMsg.put("tool_call_id", id);
+                            toolMsg.put("name", name);
+                            toolMsg.put("content", "该工具已被用户禁用，无法调用。请继续执行其他任务。");
+                            messages.add(toolMsg);
+                            continue;
+                        }
+                    }
+                    
                     System.out.println("Invoking tool: " + name);
                     if (toolNotifier != null) {
                         try {
@@ -892,6 +933,18 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                         }
                     }
 
+                    // 记录工具调用历史到数据库
+                    if (userId != null) {
+                        boolean success = result != null && !result.startsWith("Error");
+                        try {
+                            String resultSummary = result != null && result.length() > 200 ? result.substring(0, 200) + "..." : result;
+                            toolManagementService.recordToolCall(userId, name, toolDisplayName(name),
+                                null, args, resultSummary, success);
+                        } catch (Exception e) {
+                            System.err.println("Failed to record tool call: " + e.getMessage());
+                        }
+                    }
+                    
                     stats.getToolCalls().add(new GenerationStats.ToolCallRecord(
                             name,
                             toolDisplayName(name),

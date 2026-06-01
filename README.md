@@ -1,92 +1,205 @@
-# Agent应用项目
+# IntelliTravel Pioneer - AI旅行规划Agent系统
 
+> 基于ReAct Agent架构的智能旅行规划系统，实现AI自主思考、工具调用、实时交互的完整闭环
 
+## 项目概述
 
-## Getting started
+IntelliTravel Pioneer 是一个**AI Agent应用**，采用Plan-Execute-Verify三阶段架构，通过MCP协议集成高德地图工具，实现AI自主规划旅行行程。系统通过SSE实时推送Agent思考过程，让用户透明地看到AI的决策逻辑。
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### 核心特性
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- **ReAct Agent架构**: 三阶段自主规划（Plan → Execute → Verify）
+- **MCP工具集成**: 通过SSE连接高德地图，实时验证地理数据
+- **SSE实时推送**: Agent思考过程、工具调用实时可视化
+- **自愈能力**: 工具失败自动重试、JSON截断自动修复
+- **智能行程修改**: AI自主识别用户意图（删除/替换/修改）
 
-## Add your files
+## 技术架构
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+### 后端技术栈
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Spring Boot | 4.0.3 | Web框架 |
+| Java | 21 | 编程语言 |
+| Spring Data JPA | - | ORM框架 |
+| MySQL | 8.0.41 | 数据库 |
+| JWT (java-jwt) | 4.4.0 | 认证 |
+| BCrypt | 0.10.2 | 密码加密 |
+| DeepSeek API | v4-pro | AI模型 |
+| 高德地图MCP | SSE协议 | 地图工具 |
+| Playwright | 1.40.0 | 截图服务 |
+| Thymeleaf | - | 模板引擎 |
+| Maven | - | 构建工具 |
+
+### 前端技术栈
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Vue | 3.5.25 | 前端框架 |
+| TypeScript | 5.9.3 | 编程语言 |
+| Element Plus | 2.13.2 | UI组件库 |
+| Vite | 7.3.1 | 构建工具 |
+| Pinia | 3.0.4 | 状态管理 |
+| Vue Router | 5.0.2 | 路由管理 |
+| Axios | 1.13.5 | HTTP客户端 |
+
+## 项目结构
 
 ```
-cd existing_repo
-git remote add origin http://172.29.4.49/2026seiii-077-agent/agent-project.git
-git branch -M master
-git push -uf origin master
+agent-project/
+├── intellitravel-pioneer/    # 后端Spring Boot项目
+│   ├── src/main/java/        # Java源码
+│   │   ├── controller/       # REST控制器
+│   │   ├── service/          # 业务逻辑层
+│   │   ├── repository/       # 数据访问层
+│   │   ├── entity/           # 实体类
+│   │   ├── dto/              # 数据传输对象
+│   │   ├── configure/        # 配置类
+│   │   └── exception/        # 异常处理
+│   ├── src/main/resources/   # 配置文件、模板
+│   ├── pom.xml               # Maven配置
+│   └── intellitravel.sql     # 数据库脚本
+├── planclient/               # 前端Vue.js项目
+│   ├── src/
+│   │   ├── api/              # API接口封装
+│   │   ├── views/            # 页面组件
+│   │   ├── router/           # 路由配置
+│   │   ├── stores/           # Pinia状态管理
+│   │   └── assets/           # 静态资源
+│   ├── package.json          # Node.js配置
+│   └── vite.config.ts        # Vite配置
+└── Changes.md                # 项目修改记录
 ```
 
-## Integrate with your tools
+## 核心功能
 
-- [ ] [Set up project integrations](http://172.29.4.49/2026seiii-077-agent/agent-project/-/settings/integrations)
+### 1. AI Agent行程规划
 
-## Collaborate with your team
+**三阶段架构**:
+```
+Phase 1: PLAN（规划阶段）
+    ├── 输入：用户需求（目的地、天数、兴趣、预算）
+    ├── LLM制定策略：需求分析 → 任务分解 → 执行策略
+    └── 输出：规划策略文本
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Automatically merge when pipeline succeeds](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+Phase 2: EXECUTE（执行阶段）
+    ├── Agent Loop（最多15轮）：
+    │   ├── Thought：分析当前进度
+    │   ├── Tool Call：调用高德地图MCP工具验证真实数据
+    │   ├── SelfCheck：自检完整性/真实性/合理性
+    │   └── final_output：输出完整JSON行程
+    └── 工具失败自动重试（最多2次）
 
-## Test and Deploy
+Phase 3: VERIFY（审核阶段）
+    ├── 独立审核员检查：完整性、真实性、合理性、预算匹配
+    ├── 不通过则自动修正（最多2轮）
+    └── 输出审核结论
+```
 
-Use the built-in continuous integration in GitLab.
+### 2. MCP工具集成
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+通过SSE协议连接高德地图MCP服务，Agent可调用的工具：
+- `maps_text_search` — 地点搜索
+- `maps_around_search` — 周边搜索
+- `maps_weather` — 天气查询
+- `maps_direction_*` — 路线规划
+- `maps_schema_*` — 地图链接生成
+- `search_destination_info` — 内置12城市旅行知识库
 
-***
+### 3. SSE实时推送
 
-# Editing this README
+前端通过 `fetch` + `ReadableStream` 连接后端SSE，实时接收：
+- `phase` 事件：三阶段进度
+- `thought` 事件：Agent的思考过程
+- `tool` 事件：工具调用详情
+- `result` 事件：最终行程JSON
+- `stats` 事件：Token使用统计
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
+### 4. 行程管理
 
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+- 新建行程：AI自主规划，支持多种参数配置
+- 修改行程：智能意图识别（删除/替换/修改描述）
+- 行程存储：JSON格式，支持拖拽排序、编辑
+- 行程分享：生成精美海报（Thymeleaf + Playwright）
 
-## Name
-Choose a self-explaining name for your project.
+### 5. 用户与社交系统
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+- 用户注册/登录（JWT认证）
+- 关注/粉丝系统
+- 社区帖子/评论/点赞/收藏
+- 私信功能
+- 时光胶囊
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## 数据库设计
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+包含15张核心表：
+- **用户系统**: user, user_health, user_follow, user_friend
+- **行程系统**: itinerary, real_time_trip, trip_trajectory_map
+- **社区系统**: community_post, community_comment, community_like
+- **旅行报告**: trip_report, trip_summary, challenge_record
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## API接口
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### 用户模块 (`/api/user`)
+- `POST /api/user` — 用户注册
+- `POST /api/user/login` — 用户登录
+- `GET /api/user/{username}` — 获取用户信息
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### 行程规划模块 (`/api/itinerary`)
+- `POST /api/itinerary/generate/stream` — SSE流式生成行程
+- `POST /api/itinerary/modify/stream` — SSE流式修改行程
+- `POST /api/itinerary/save` — 保存行程
+- `GET /api/itinerary/detail/{id}` — 获取行程详情
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+### 地图模块 (`/api/amap`)
+- `POST /api/amap/geocode` — 地理编码
+- `GET /api/amap/weather` — 天气查询
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+## 快速开始
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+### 环境要求
+- Java 21+
+- Node.js 18+
+- MySQL 8.0+
+- Maven 3.8+
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### 后端启动
+```bash
+cd intellitravel-pioneer
+# 配置环境变量
+export SILICONFLOW_API_KEY=your_api_key
+export AMAP_KEY=your_amap_key
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+# 启动应用
+./mvnw spring-boot:run
+```
 
-## License
-For open source projects, say how it is licensed.
+### 前端启动
+```bash
+cd planclient
+npm install
+npm run dev
+```
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+### 访问地址
+- 前端: http://localhost:5173
+- 后端API: http://localhost:8080
+
+## 项目状态
+
+**当前版本**: 活跃开发中  
+**最后更新**: 2026年5月7日  
+**主要方向**: Agent架构优化、用户体验提升
+
+## 迭代计划
+
+详见 [迭代计划文档](./iteration-plan.md)
+
+## 许可证
+
+本项目仅供学习交流使用
+
+---
+
+> 本项目展示了如何将ReAct Agent架构应用于实际业务场景，实现了AI自主规划、工具调用、实时交互的完整闭环。

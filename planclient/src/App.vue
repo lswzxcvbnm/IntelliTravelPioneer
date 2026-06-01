@@ -18,6 +18,7 @@ const isBattleCreate = computed(() => route.path === '/battle/create')
 const navItems = [
   { path: '/dashboard', label: '首页', icon: '🏠' },
   { path: '/battle', label: '行程仓库', icon: '📋' },
+  { path: '/tools', label: '工具管理', icon: '🔧' },
 ]
 
 const goCreate = () => {
