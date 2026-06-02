@@ -6,7 +6,6 @@ import Register from '../views/user/Register.vue'
 const BattleCockpit = () => import('../views/battle/BattleCockpit.vue')
 const BattleCustomizePlan = () => import('../views/battle/BattleCustomizePlan.vue')
 const ToolsManagement = () => import('../views/battle/ToolsManagement.vue')
-const SkillManage = () => import('../views/battle/SkillManage.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -50,9 +49,14 @@ const router = createRouter({
       component: ToolsManagement
     },
     {
-      path: '/battle/skills',
-      name: 'SkillManage',
-      component: SkillManage
+      path: '/conversation',
+      name: 'ConversationList',
+      component: () => import('../views/conversation/ConversationList.vue')
+    },
+    {
+      path: '/conversation/:id',
+      name: 'ConversationDetail',
+      component: () => import('../views/conversation/ConversationDetail.vue')
     }
   ]
 })
@@ -61,11 +65,13 @@ const routesRequireAuth = [
   '/battle',
   '/battle/create',
   '/tools',
-  '/battle/skills'
+  '/conversation'
 ]
 
 router.beforeEach((to, _from, next) => {
-  if (!routesRequireAuth.includes(to.path)) {
+  const requiresAuth = routesRequireAuth.some(route => to.path === route || to.path.startsWith(route + '/'))
+
+  if (!requiresAuth) {
     return next()
   }
 

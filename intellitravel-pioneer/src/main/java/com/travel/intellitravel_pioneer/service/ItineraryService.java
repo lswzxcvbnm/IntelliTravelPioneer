@@ -19,12 +19,12 @@ public interface ItineraryService {
     }
 
     ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
-            ItineraryPlan currentPlan, String userPrompt);
+            ItineraryPlan currentPlan, String userPrompt, String conversationId);
 
     default GenerationResult modifyItineraryWithStats(String token, ItineraryRequest request,
             ItineraryPlan currentPlan, String userPrompt,
-            java.util.function.Consumer<String> toolNotifier) {
-        ItineraryPlan plan = modifyItinerary(token, request, currentPlan, userPrompt);
+            java.util.function.Consumer<String> toolNotifier, String conversationId) {
+        ItineraryPlan plan = modifyItinerary(token, request, currentPlan, userPrompt, conversationId);
         return new GenerationResult(plan, null);
     }
 

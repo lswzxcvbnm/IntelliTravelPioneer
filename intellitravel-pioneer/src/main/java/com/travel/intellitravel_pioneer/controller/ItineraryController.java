@@ -107,6 +107,12 @@ public class ItineraryController {
                             .name("stats")
                             .data(statsJson));
                 }
+
+                if (result.getConversationId() != null) {
+                    emitter.send(SseEmitter.event()
+                            .name("conversationId")
+                            .data(result.getConversationId()));
+                }
                 
                 if (completed.compareAndSet(false, true)) {
                     emitter.complete();
@@ -170,6 +176,7 @@ public class ItineraryController {
                 ItineraryPlan currentPlan = objectMapper.convertValue(
                         body.get("currentPlan"), ItineraryPlan.class);
                 String userPrompt = (String) body.get("userPrompt");
+                String conversationId = (String) body.get("conversationId");
 
                 GenerationResult result = itineraryService.modifyItineraryWithStats(token, request,
                         currentPlan, userPrompt, message -> {
@@ -196,7 +203,7 @@ public class ItineraryController {
                     } catch (Exception e) {
                         System.err.println("Error sending SSE event (modify): " + e.getMessage());
                     }
-                });
+                }, conversationId);
                 
                 System.out.println("====== modifyItinerary completed, sending result ======");
                 String planJson = objectMapper.writeValueAsString(result.getPlan());
@@ -208,6 +215,12 @@ public class ItineraryController {
                     emitter.send(SseEmitter.event()
                             .name("stats")
                             .data(statsJson));
+                }
+
+                if (result.getConversationId() != null) {
+                    emitter.send(SseEmitter.event()
+                            .name("conversationId")
+                            .data(result.getConversationId()));
                 }
                 
                 if (completed.compareAndSet(false, true)) {

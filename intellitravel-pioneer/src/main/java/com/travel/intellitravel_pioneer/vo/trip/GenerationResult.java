@@ -12,4 +12,10 @@ public class GenerationResult {
 
     private ItineraryPlan plan;
     private GenerationStats stats;
+    private String conversationId;
+
+    public GenerationResult(ItineraryPlan plan, GenerationStats stats) {
+        this.plan = plan;
+        this.stats = stats;
+    }
 }

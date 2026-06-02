@@ -42,7 +42,6 @@ export interface ItineraryRequest {
     interests: string[]
     budgetLevel: string
     additionalNotes: string
-    skillIds?: string[]
 }
 
 export interface ItinerarySaveRequest {
@@ -93,7 +92,8 @@ export async function generateItineraryStream(
     onToolCall: (msg: string) => void,
     onResult: (plan: ItineraryPlan) => void,
     onError: (err: any) => void,
-    onStats?: (stats: GenerationStats) => void
+    onStats?: (stats: GenerationStats) => void,
+    onConversationId?: (id: string) => void
 ) {
     const token = getAuthToken();
     try {
@@ -159,6 +159,10 @@ export async function generateItineraryStream(
                                 if (onStats) {
                                     onStats(JSON.parse(eventData));
                                 }
+                            } else if (eventName === 'conversationId') {
+                                if (onConversationId) {
+                                    onConversationId(eventData);
+                                }
                             }
                         } catch (e) {
                             console.error('Failed to process event/data:', eventName, eventData, e);
@@ -184,12 +188,14 @@ export async function modifyItineraryStream(
     request: ItineraryRequest,
     currentPlan: ItineraryPlan,
     userPrompt: string,
+    conversationId: string | null,
     onPhase: (phase: PhaseData) => void,
     onThought: (msg: string) => void,
     onToolCall: (msg: string) => void,
     onResult: (plan: ItineraryPlan) => void,
     onError: (err: any) => void,
-    onStats?: (stats: GenerationStats) => void
+    onStats?: (stats: GenerationStats) => void,
+    onConversationId?: (id: string) => void
 ) {
     const token = getAuthToken();
     try {
@@ -199,7 +205,7 @@ export async function modifyItineraryStream(
                 'Content-Type': 'application/json',
                 'token': token
             },
-            body: JSON.stringify({ request, currentPlan, userPrompt })
+            body: JSON.stringify({ request, currentPlan, userPrompt, conversationId })
         });
 
         if (!response.ok) {
@@ -254,6 +260,10 @@ export async function modifyItineraryStream(
                             } else if (eventName === 'stats') {
                                 if (onStats) {
                                     onStats(JSON.parse(eventData));
+                                }
+                            } else if (eventName === 'conversationId') {
+                                if (onConversationId) {
+                                    onConversationId(eventData);
                                 }
                             }
                         } catch (e) {
