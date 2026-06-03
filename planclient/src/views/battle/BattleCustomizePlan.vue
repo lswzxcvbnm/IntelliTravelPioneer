@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
+<template>
   <div class="customize-shell">
     <div class="customize-main">
       <header class="top-bar">
@@ -250,7 +250,7 @@
               <div v-if="expandedGroups.has(group.phase)" class="ap-phase-body">
                 <div v-for="(entry, ei) in group.entries" :key="ei" class="ap-entry">
                   <template v-if="entry.type === 'thought' && !isEmptyEntry(entry)">
-                    <div class="ap-thought" :class="{ collapsed: !isThoughtExpanded(getGlobalIndex(gi, ei)) }" @click="toggleActiveThought(getGlobalIndex(gi, ei))">
+                    <div class="ap-thought" :class="{ collapsed: !isThoughtExpanded(getGlobalIndex(gi, ei)), 'ap-thought-duplicate': ei > 0 && isDuplicateThought(entry, group.entries[ei-1]) }" @click="toggleActiveThought(getGlobalIndex(gi, ei))">
                       <div class="ap-thought-bar"></div>
                       <div class="ap-thought-inner">
                         <div class="ap-thought-header">
@@ -258,6 +258,7 @@
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
                           </span>
                           <span class="ap-thought-label">推理</span>
+                          <span v-if="ei > 0 && isDuplicateThought(entry, group.entries[ei-1])" class="ap-thought-duplicate-badge">重复</span>
                           <span class="ap-thought-toggle">{{ isThoughtExpanded(getGlobalIndex(gi, ei)) ? '收起' : '展开' }}</span>
                         </div>
                         <div v-if="isThoughtExpanded(getGlobalIndex(gi, ei))" class="ap-thought-full" v-html="formatThoughtMessage(entry.message)"></div>
@@ -605,14 +606,15 @@ watch(
         thoughtIndices.push(i)
       }
     }
-    const recentThree = thoughtIndices.slice(-3)
+    // 只自动展开最近的1条思考过程（减少信息过载）
+    const recentOne = thoughtIndices.slice(-1)
     const newExpanded = new Set(expandedActiveThoughts.value)
-    for (const idx of recentThree) {
+    for (const idx of recentOne) {
       if (!manuallyToggledThoughts.value.has(idx)) {
         newExpanded.add(idx)
       }
     }
-    for (const idx of thoughtIndices.slice(0, -3)) {
+    for (const idx of thoughtIndices.slice(0, -1)) {
       if (!manuallyToggledThoughts.value.has(idx)) {
         newExpanded.delete(idx)
       }
@@ -718,6 +720,20 @@ const groupedLogs = computed((): PhaseGroup[] => {
     .map(phase => ({ phase, entries: groupMap.get(phase)! }))
     .filter(group => group.entries.some(e => e.type === 'thought' || e.type === 'tool'))
 })
+
+// 重复内容检测：对连续相似的thought进行标记
+const isDuplicateThought = (entry: LogEntry, prevEntry?: LogEntry): boolean => {
+  if (!prevEntry || prevEntry.type !== 'thought' || entry.type !== 'thought') return false
+  const msg1 = entry.message.trim().toLowerCase()
+  const msg2 = prevEntry.message.trim().toLowerCase()
+  // 如果内容相似度超过80%，认为是重复
+  if (msg1 === msg2) return true
+  if (msg1.includes(msg2) || msg2.includes(msg1)) return true
+  // 简单的相似度检测：前50字符相同
+  const prefix1 = msg1.substring(0, 50)
+  const prefix2 = msg2.substring(0, 50)
+  return prefix1 === prefix2 && prefix1.length > 20
+}
 
 const toggleGroupExpand = (phase: string) => {
   const newSet = new Set(expandedGroups.value)

@@ -23,6 +23,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -289,15 +290,26 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             【工作流程】
             遵循制定好的执行规划，按子任务顺序执行。每一轮按以下格式输出：
-
             Thought: [分析当前进度，说明本轮要完成什么子任务，为什么需要调用工具]
 
             【核心规则】
-            1. 鼓励并行：同时查天气+搜索景点，不要逐个来。Thought 要具体，如"子任务1.天气侦察：北京3天需查3天预报来决定户外/室内分配"
-            2. 失败处理：工具调用失败时在 Thought 中说明，并尝试备选方案（换关键词或使用其他工具替代）
+            1. 并行调用：同一轮可同时调用多个无依赖的工具，提高效率
+               - 可并行：天气查询 + 景点搜索 + 目的地信息查询
+               - 可并行：多个景点的详情查询
+               - 不可并行：需要先搜索景点，才能查询周边餐饮
+            2. 失败处理：工具调用失败时在 Thought 中说明，并尝试备选方案
             3. 严禁编造：所有地点名称和坐标必须来自工具返回结果
             4. 每天至少安排 2-3 个行程项
-            5. **天数硬约束：totalDays 和 dailyPlans 的数量必须严格等于用户请求的天数（request.days），不多不少！绝对不能重复生成相同 dayNumber 的计划**
+            5. 天数硬约束：totalDays 和 dailyPlans 的数量必须严格等于用户请求的天数
+
+            【行程质量标准】
+            生成的行程必须满足以下质量要求：
+            - 完整性：每天至少 2-3 个行程项，覆盖景点、餐饮、住宿（多日游）
+            - 真实性：所有地点名称必须来自工具返回或已知真实景点，经纬度必须真实
+            - 合理性：同一天内景点距离不宜过远（建议同区域安排），路线不绕路
+            - 个性化：根据用户偏好（亲子/情侣/朋友）调整活动类型和节奏
+            - 可执行性：描述具体（如"颐和园长廊"而非"当地景点"），预算合理
+            - 预算匹配：总预算与用户选择的档次（经济/舒适/豪华）匹配
 
             【可用工具】
             - 高德地图工具（maps_开头）：查询真实地理信息、天气、路线，验证地点经纬度
@@ -309,25 +321,41 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             2. 已搜索并验证足够的景点（每天至少 2-3 个）
             3. 已搜索必要的餐饮/住宿信息
             4. 已完成 SelfCheck 自检
-            信息足够后直接输出 final_output，不要再调用工具。
 
             【SelfCheck 自检（输出前必须完成）】
             Thought: SelfCheck:
-            OK totalDays 等于用户请求天数 -> [请求N天, 输出M天, 一致/不一致]
-            OK dailyPlans 数量等于 totalDays -> [dailyPlans有X项, totalDays=Y]
-            OK 每个 dayNumber 不重复且连续从1到totalDays -> [已检查]
-            OK 每天至少3个行程项 -> [实际: Day1=X项 ...]
+            OK totalDays 等于用户请求天数 -> [一致/不一致]
+            OK 每天至少3个行程项 -> [已检查]
             OK 所有地点名称来自工具返回 -> [已验证]
-            OK 所有坐标来自工具返回 -> [已验证]
             OK 无模糊描述 -> [全部具体]
+
+            【示例】
+            用户请求：北京3天亲子游，预算3000元
+
+            Thought: 用户需要北京3天亲子游，我先查询天气和搜索景点信息。
+            工具调用: maps_weather(北京) + maps_text_search(北京亲子景点)
+            工具返回: 天气晴朗25℃，搜索到故宫、颐和园、北京动物园等
+
+            Thought: 已获得景点信息，继续搜索餐饮和住宿。
+            工具调用: maps_around_search(故宫附近餐厅)
+            工具返回: 找到东来顺、全聚德等餐厅
+
+            Thought: SelfCheck:
+            OK totalDays=3 等于用户请求天数 -> [一致]
+            OK 每天3个行程项 -> [已检查]
+            OK 所有地点名称来自工具返回 -> [已验证]
+            OK 无模糊描述 -> [全部具体]
+
+            final_output
+            {"title":"北京3天亲子游","estimatedCost":3000.0,"totalDays":3,"dailyPlans":[...]}
+            /final_output
 
             【最终输出格式】
             用 final_output 标签包裹纯 JSON：
             final_output
             {"title":"...", "estimatedCost":1500.0, "totalDays":N, "dailyPlans":[{"dayNumber":1, "items":[{"type":"景点|餐饮|住宿|购物","name":"具体地点名称","description":"详细描述（30字以内）","location":{"lat":39.9163,"lng":116.3971,"name":"位置名称"}}]}]}
             /final_output
-            其中 N 必须严格等于用户 request 中的 days 字段值。
-            final_output 标签外的任何内容都不会进入最终结果。""";
+            其中 N 必须严格等于用户 request 中的 days 字段值。""";
 
     // ==================== Verify System Prompt ====================
     private static final String VERIFY_SYSTEM_PROMPT = """
@@ -341,9 +369,16 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             5. 【偏好覆盖】是否覆盖了用户的兴趣偏好？
             6. 【描述质量】每个行程项的描述是否具体可执行？（禁止"当地特色餐厅"等模糊描述）
 
-            请输出审核结论，格式：
-            {"status":"PASS","issues":[],"summary":"总体评价..."}
-            如果 status 为 FAIL，则 issues 数组中指明具体哪些天、哪些项有问题。""";
+            ## 输出要求
+            - 如果审核通过，输出：{"status":"PASS","issues":[],"summary":"总体评价..."}
+            - 如果审核不通过，输出修正后的完整行程 JSON（用 final_output 标签包裹），并在 JSON 之前说明修正内容：
+
+            修正内容：[具体说明修正了哪些问题]
+            final_output
+            {"title":"...", "estimatedCost":1500.0, "totalDays":N, "dailyPlans":[...]}
+            /final_output
+
+            注意：修正时必须保持原行程的整体框架，只针对问题进行局部调整。""";
 
     // ==================== Custom Agent Tool Definitions ====================
     private static final String CUSTOM_TOOLS_JSON = """
@@ -806,9 +841,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                             if (toolNotifier != null) {
                                 toolNotifier.accept("THOUGHT:工具 [" + toolDisplayName(name) + "] 已被用户禁用，跳过调用。");
                             }
-                            // 记录工具被跳过的情况
-                            toolManagementService.recordToolCall(userId, name, toolDisplayName(name),
-                                null, args, "该工具已被用户禁用，跳过调用", true);
+
                             
                             Map<String, Object> toolMsg = new HashMap<>();
                             toolMsg.put("role", "tool");
@@ -949,7 +982,10 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
                     // 记录工具调用历史到数据库
                     if (userId != null) {
-                        boolean success = result != null && !result.startsWith("Error");
+                        boolean success = result != null && !result.startsWith("Error") 
+                            && !result.contains("由于高德地图服务暂时不可用") 
+                            && !result.contains("地图链接生成失败") 
+                            && !result.contains("地图展示链接生成失败");
                         try {
                             String resultSummary = result != null && result.length() > 200 ? result.substring(0, 200) + "..." : result;
                             toolManagementService.recordToolCall(userId, name, toolDisplayName(name),
@@ -1166,18 +1202,23 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     toolNotifier.accept("THOUGHT:" + thought);
                 }
 
-                // If LLM was asked to correct, try parse corrected plan from final_output
-                if (retryCount > 0 && content.contains("final_output")) {
+                // 优先尝试解析修正后的行程（LLM 直接输出 final_output）
+                if (content.contains("final_output")) {
                     try {
                         ItineraryPlan corrected = parseItinerary(content);
                         if (corrected != null && corrected.getDailyPlans() != null
                                 && !corrected.getDailyPlans().isEmpty()) {
                             currentPlan = corrected;
+                            return new VerifyResult(
+                                "审核发现问题，已自动修正",
+                                currentPlan);
                         }
                     } catch (Exception ex) {
+                        // 解析失败，继续尝试审核结论
                     }
                 }
 
+                // 尝试解析审核结论 JSON
                 try {
                     JsonNode verifyJson = objectMapper.readTree(extractFirstJsonObject(content));
                     String status = verifyJson.path("status").asText("PASS");
@@ -1660,13 +1701,13 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         HttpClient streamingClient = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(requestUrl))
-                .header("Content-Type", "application/json")
+                .header("Content-Type", "application/json; charset=utf-8")
                 .header("Authorization", "Bearer " + llmApiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
                 .build();
 
         try {
-            HttpResponse<String> response = streamingClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = streamingClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 
             if (response.statusCode() != 200) {
                 String errBody = response.body() != null ? response.body() : "";
@@ -2005,11 +2046,11 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             HttpRequest postReq = HttpRequest.newBuilder()
                     .uri(URI.create(postEndpoint))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
                     .build();
 
-            return client.send(postReq, HttpResponse.BodyHandlers.ofString());
+            return client.send(postReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         }
 
         @Override

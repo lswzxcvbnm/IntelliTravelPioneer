@@ -20,8 +20,6 @@ public class ToolManagementService {
     private final ToolDefinitionRepository toolDefinitionRepository;
     private final UserToolPreferenceRepository userToolPreferenceRepository;
     private final ToolCallHistoryRepository toolCallHistoryRepository;
-    private final ItineraryRepository itineraryRepository;
-
     private static final Map<String, String[]> TOOL_SEED_DATA = new LinkedHashMap<>() {{
         put("maps_weather", new String[]{"天气查询", "地图", "查询指定城市的实时天气信息，包括温度、湿度、风力、天气状况等",
                 "[{\"name\":\"city\",\"type\":\"string\",\"required\":true,\"description\":\"城市名称，如北京\"}]",

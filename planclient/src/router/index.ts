@@ -6,6 +6,7 @@ import Register from '../views/user/Register.vue'
 const BattleCockpit = () => import('../views/battle/BattleCockpit.vue')
 const BattleCustomizePlan = () => import('../views/battle/BattleCustomizePlan.vue')
 const ToolsManagement = () => import('../views/battle/ToolsManagement.vue')
+const SkillManage = () => import('../views/battle/SkillManage.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -39,6 +40,11 @@ const router = createRouter({
       component: BattleCockpit
     },
     {
+      path: '/battle/skills',
+      name: 'SkillManage',
+      component: SkillManage
+    },
+    {
       path: '/battle/create',
       name: 'BattleCustomizePlan',
       component: BattleCustomizePlan
@@ -63,6 +69,7 @@ const router = createRouter({
 
 const routesRequireAuth = [
   '/battle',
+  '/battle/skills',
   '/battle/create',
   '/tools',
   '/conversation'

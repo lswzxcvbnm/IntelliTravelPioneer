@@ -36,7 +36,7 @@ public class ItineraryController {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @PostMapping(value = "/generate/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PostMapping(value = "/generate/stream", produces = "text/event-stream;charset=UTF-8")
     public SseEmitter generateItineraryStream(
             @RequestHeader("token") String token,
             @RequestBody ItineraryRequest request) {
@@ -141,7 +141,7 @@ public class ItineraryController {
         return emitter;
     }
 
-    @PostMapping(value = "/modify/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PostMapping(value = "/modify/stream", produces = "text/event-stream;charset=UTF-8")
     public SseEmitter modifyItineraryStream(
             @RequestHeader("token") String token,
             @RequestBody Map<String, Object> body) {

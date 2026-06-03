@@ -305,7 +305,7 @@ const getToolIcon = (name: string): string => {
 }
 
 const calcRate = (success: number, total: number): number => {
-  if (total === 0) return 100
+  if (total === 0) return 0
   return Math.round((success / total) * 100)
 }
 
