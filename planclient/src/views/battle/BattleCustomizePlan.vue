@@ -1,209 +1,211 @@
-﻿﻿<template>
+<template>
   <div class="customize-shell">
-    <div class="customize-main">
+    <div class="customize-main" :class="{ 'with-panel': !agentPanelCollapsed }">
       <header class="top-bar">
         <button type="button" class="back-btn" @click="goBack">← 返回</button>
         <h1>{{ isEditMode ? '编辑行程计划' : '创建行程计划' }}</h1>
+        <div class="top-bar-right">
+          <button v-if="editablePlan" type="button"
+            class="top-bar-toggle-form" :class="{ active: showForm }"
+            @click="showForm = !showForm">需求</button>
+          <button type="button"
+            class="top-bar-toggle-panel" :class="{ active: !agentPanelCollapsed }"
+            @click="agentPanelCollapsed = !agentPanelCollapsed">AI</button>
+        </div>
       </header>
 
       <div class="content-scroll" ref="contentScrollRef">
-        <section class="card" v-if="step === 1">
-          <h2>输入行程需求</h2>
-          <div class="form-cols">
-            <label class="input-card input-card-entry">
-              <span class="label-text">📍 目的地</span>
-              <input v-model.trim="request.destination" placeholder="想去哪里探索？" class="large-input" />
-            </label>
-            <div class="row-group">
-              <label class="input-card half">
-                <span class="label-text">📅 天数</span>
-                <div class="stepper">
-                  <button class="step-btn" @click="request.days = Math.max(1, request.days - 1)">−</button>
-                  <span class="step-val">{{ request.days }}</span>
-                  <button class="step-btn" @click="request.days = Math.min(30, request.days + 1)">+</button>
-                </div>
-              </label>
-              <label class="input-card half">
-                <span class="label-text">💰 预算</span>
-                <div class="segment-group">
-                  <div v-for="opt in [{l:'经济',v:'low'},{l:'舒适',v:'medium'},{l:'豪华',v:'high'}]" :key="opt.v"
-                    class="segment-item" :class="{active: request.budgetLevel === opt.v}"
-                    @click="request.budgetLevel = opt.v">{{ opt.l }}</div>
-                </div>
-              </label>
+        <!-- Form Section - always rendered, collapsible when editablePlan exists -->
+        <section class="card form-section" :class="{ 'form-collapsed': editablePlan && !showForm }">
+          <!-- Collapsed header bar -->
+          <div v-if="editablePlan && !showForm" class="form-section-header" @click="showForm = true">
+            <div class="form-section-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              行程需求
             </div>
-            <div class="input-card full-width">
-              <span class="label-text">✨ 兴趣偏好</span>
-              <div class="chips-container">
-                <button v-for="item in interestOptions" :key="item.value" class="chip-pill"
-                  :class="[{ active: request.interests.includes(item.value) }, `chip-${item.value}`]"
-                  @click="toggleInterest(item.value)">{{ item.label }}</button>
-              </div>
-            </div>
-            <div class="input-card input-card-entry">
-              <span class="label-text">✏️ 补充说明</span>
-              <textarea v-model.trim="request.additionalNotes" rows="3"
-                placeholder="例如：希望每天傍晚安排轻松步行，避开高峰景点" />
-            </div>
+            <span>{{ request.destination || '未填写' }} · {{ request.days }}天 · {{ budgetLabel }}</span>
+            <span class="form-section-arrow">▶</span>
           </div>
-          <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
-          <div class="form-actions">
-            <button class="primary" @click="handleGenerate" :disabled="isLoadingGenerate">
-              {{ isLoadingGenerate ? '正在生成...' : '✨ 生成 AI 方案' }}
-            </button>
-          </div>
-        </section>
-
-        <section class="card" v-if="step === 2">
-          <div v-if="!editablePlan" class="empty">尚未生成或加载方案。</div>
-          <template v-else>
-
-            <div class="edit-plan-header">
-              <div class="eph-left">
-                <h2 class="eph-title-wrap">
-                  <input class="eph-title" v-model.trim="editablePlan.title" placeholder="给你的行程起个名字" />
-                </h2>
-                <div class="eph-meta">
-                  <span class="eph-tag">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                    {{ editablePlan.totalDays }} 天行程
-                  </span>
-                  <span class="eph-tag">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                    预算 ¥{{ formatCurrency(editablePlan.estimatedCost || 0).replace('￥', '') }}
-                  </span>
-                  <span class="eph-tag eph-tag-route">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
-                    {{ routeItemCount }} 个路线项
-                  </span>
+          <!-- Full form body -->
+          <template v-if="!editablePlan || showForm">
+            <div class="form-section-body">
+              <h2>输入行程需求</h2>
+              <div class="form-cols">
+                <label class="input-card input-card-entry">
+                  <span class="label-text">📍 目的地</span>
+                  <input v-model.trim="request.destination" placeholder="想去哪里探索？" class="large-input" />
+                </label>
+                <div class="row-group">
+                  <label class="input-card half">
+                    <span class="label-text">📅 天数</span>
+                    <div class="stepper">
+                      <button class="step-btn" @click="request.days = Math.max(1, request.days - 1)">−</button>
+                      <span class="step-val">{{ request.days }}</span>
+                      <button class="step-btn" @click="request.days = Math.min(30, request.days + 1)">+</button>
+                    </div>
+                  </label>
+                  <label class="input-card half">
+                    <span class="label-text">💰 预算</span>
+                    <div class="segment-group">
+                      <div v-for="opt in [{l:'经济',v:'low'},{l:'舒适',v:'medium'},{l:'豪华',v:'high'}]" :key="opt.v"
+                        class="segment-item" :class="{active: request.budgetLevel === opt.v}"
+                        @click="request.budgetLevel = opt.v">{{ opt.l }}</div>
+                    </div>
+                  </label>
+                </div>
+                <div class="input-card full-width">
+                  <span class="label-text">✨ 兴趣偏好</span>
+                  <div class="chips-container">
+                    <button v-for="item in interestOptions" :key="item.value" class="chip-pill"
+                      :class="[{ active: request.interests.includes(item.value) }, `chip-${item.value}`]"
+                      @click="toggleInterest(item.value)">{{ item.label }}</button>
+                  </div>
+                </div>
+                <div class="input-card input-card-entry">
+                  <span class="label-text">✏️ 补充说明</span>
+                  <textarea v-model.trim="request.additionalNotes" rows="3"
+                    placeholder="例如：希望每天傍晚安排轻松步行，避开高峰景点" />
                 </div>
               </div>
-              <div class="eph-actions">
-                 <button class="secondary eph-btn" @click="handleGoBackToStep1">
-                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-                   返回需求
-                 </button>
-                <button class="primary eph-btn eph-save" @click="savePlan" :disabled="isSaving">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                  {{ isSaving ? '保存中...' : isEditMode ? '更新方案' : '保存方案' }}
+              <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+              <div class="form-actions">
+                <button class="primary" @click="handleGenerate" :disabled="isLoadingGenerate">
+                  {{ isLoadingGenerate ? '正在生成...' : '✨ 生成 AI 方案' }}
                 </button>
-              </div>
-            </div>
-
-            <div class="ai-refine-box">
-              <div class="ai-refine-header">
-                <span class="ai-refine-badge">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0110 10c0 5.52-4.48 10-10 10S2 17.52 2 12"/><path d="m12 12-.5-8"/></svg>
-                  AI 智能优化
-                </span>
-                <span class="ai-refine-hint">描述你的修改意图，AI 将自动调整行程</span>
-              </div>
-              <textarea v-model="refinePrompt" rows="2"
-                placeholder="例如：把第一天的景点换成室内的、晚餐都安排在酒店附近、增加一个博物馆..." />
-              <div class="ai-refine-actions">
-                <button class="primary mini ai-send-btn" @click="handleAiRefine" :disabled="isRefining || !refinePrompt.trim()">
-                  {{ isRefining ? 'AI 思考中...' : '发送给 AI' }}
-                </button>
-              </div>
-            </div>
-
-            <div class="timeline-view">
-              <div class="day-section" v-for="(day, di) in editablePlan.dailyPlans" :key="day.dayNumber"
-                @dragover.prevent @drop="onDayDrop(day.dayNumber)">
-                <div class="day-header-card">
-                  <div class="day-header-left">
-                    <div class="day-index-badge">{{ day.dayNumber }}</div>
-                    <div class="day-header-info">
-                      <span class="day-header-label">第 {{ day.dayNumber }} 天</span>
-                      <span class="day-header-sub">{{ day.items.length }} 个地点 · {{ day.items.filter(i => i.type === '美食').length }} 餐饮 · {{ day.items.filter(i => i.type === '住宿').length }} 住宿</span>
-                    </div>
-                  </div>
-                  <button class="btn-add-item" @click="addItem(day.dayNumber)">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    添加
-                  </button>
-                </div>
-                <div class="timeline-list">
-                  <div class="timeline-row" v-for="(item, idx) in day.items" :key="`${day.dayNumber}-${idx}`"
-                    draggable="true" @dragstart="onDragStart(day.dayNumber, idx)"
-                    @dragover.prevent @drop.stop="onDrop(day.dayNumber, idx)"
-                    :class="`type-border-${getTypeClass(item.type)}`">
-                    <div class="timeline-thread">
-                      <div class="node-circle" :class="`bg-${getTypeClass(item.type)}`">{{ getTypeIcon(item.type) }}</div>
-                    </div>
-                    <div class="timeline-card-wrap">
-                      <div class="timeline-card">
-                        <div class="card-header-row">
-                          <div class="card-info">
-                            <div class="card-title-row">
-                              <span class="card-type-tag" :class="`tag-${getTypeClass(item.type)}`">{{ item.type }}</span>
-                              <div class="card-title">{{ item.name || '未命名路线项' }}</div>
-                              <button v-if="hasLocation(item)" class="map-link-btn" @click="openMap(item)" title="在地图中查看">
-                                📍 地图
-                              </button>
-                            </div>
-                            <div class="card-desc">{{ item.description || '暂无描述' }}</div>
-                            <div v-if="hasLocation(item) && item.location?.name" class="card-location">
-                              <span class="location-icon">📍</span>
-                              <span class="location-name">{{ item.location.name }}</span>
-                              <span v-if="formatCoordinates(item)" class="location-coords">
-                                {{ formatCoordinates(item) }}
-                              </span>
-                            </div>
-                          </div>
-                          <span class="drag-handle">⋮⋮</span>
-                        </div>
-                        <div class="card-actions-row">
-                          <button class="text-btn" @click="toggleItemEditor(day.dayNumber, idx)">
-                            {{ isItemEditing(day.dayNumber, idx) ? '收起' : '编辑' }}</button>
-                          <button class="text-btn danger" @click="removeItem(day.dayNumber, idx)">删除</button>
-                        </div>
-                        <div v-if="isItemEditing(day.dayNumber, idx)" class="embedded-editor">
-                          <div class="field-row">
-                            <select v-model="item.type" class="mini-select">
-                              <option v-for="t in routeTypeOptions" :key="t" :value="t">{{ t }}</option>
-                            </select>
-                            <input v-model.trim="item.name" placeholder="名称" class="mini-input" />
-                          </div>
-                          <textarea v-model.trim="item.description" rows="2" placeholder="描述..." class="mini-textarea" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div v-if="day.items.length === 0" class="empty-day-placeholder">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-                    <span>点击上方「添加」按钮或拖拽来安排今日行程</span>
-                  </div>
-                </div>
               </div>
             </div>
           </template>
         </section>
 
-        <section class="card" v-if="step === 3">
-          <h2>行程详情预览</h2>
-          <p class="hint">方案已保存，你可以继续编辑或返回列表查看。</p>
-          <div class="saved-preview">
-            <div class="saved-preview-header"><h3>行程详情预览</h3><span class="saved-tag">已保存</span></div>
-            <div class="saved-overview">
-              <p><strong>标题：</strong>{{ editablePlan?.title || '(未命名)' }}</p>
-              <p><strong>总天数：</strong>{{ editablePlan?.totalDays || 0 }} 天</p>
-              <p><strong>预算：</strong>{{ formatCurrency(editablePlan?.estimatedCost || 0) }}</p>
-              <p><strong>路线项：</strong>{{ routeItemCount }} 个</p>
-            </div>
-            <div class="preview-days">
-              <div class="preview-day" v-for="day in editablePlan?.dailyPlans" :key="`pv-${day.dayNumber}`">
-                <p class="preview-day-title">第 {{ day.dayNumber }} 天</p>
-                <ul>
-                  <li v-for="(item, i) in day.items" :key="i">
-                    <span>{{ getTypeIcon(item.type) }}</span><span>{{ item.name }}</span>
-                  </li>
-                </ul>
+        <!-- Editor Section - shown when editablePlan exists -->
+        <section class="card editor-section" v-if="editablePlan">
+          <div class="edit-plan-header">
+            <div class="eph-left">
+              <h2 class="eph-title-wrap">
+                <input class="eph-title" v-model.trim="editablePlan.title" placeholder="给你的行程起个名字" />
+              </h2>
+              <div class="eph-meta">
+                <span class="eph-tag">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                  {{ editablePlan.totalDays }} 天行程
+                </span>
+                <span class="eph-tag">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                  预算 ¥{{ formatCurrency(editablePlan.estimatedCost || 0).replace('￥', '') }}
+                </span>
+                <span class="eph-tag eph-tag-route">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+                  {{ routeItemCount }} 个路线项
+                </span>
               </div>
             </div>
-            <div class="form-actions">
-              <button class="secondary" @click="continueEditing">继续编辑</button>
-              <button class="primary" @click="goBackToList">返回列表</button>
+            <div class="eph-actions">
+              <button v-if="activeConversationId || route.query.convId"
+                class="eph-btn eph-conv-link"
+                @click="router.push(`/conversation/${activeConversationId || route.query.convId}`)"
+                title="查看 AI 对话历史与推理过程">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                对话记录
+              </button>
+              <button class="primary eph-btn eph-save" @click="savePlan" :disabled="isSaving">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                {{ isSaving ? '保存中...' : isEditMode ? '更新方案' : '保存方案' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="ai-refine-box">
+            <div class="ai-refine-header">
+              <span class="ai-refine-badge">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0110 10c0 5.52-4.48 10-10 10S2 17.52 2 12"/><path d="m12 12-.5-8"/></svg>
+                AI 智能优化
+              </span>
+              <span class="ai-refine-hint">描述你的修改意图，AI 将自动调整行程</span>
+            </div>
+            <div class="ai-chat-input-row">
+              <textarea v-model="refinePrompt" rows="1"
+                placeholder="例如：把第一天的景点换成室内的、晚餐都安排在酒店附近、增加一个博物馆..."
+                @keydown.enter.exact.prevent="handleAiRefineQuick" />
+              <button class="primary mini ai-send-btn" @click="handleAiRefine" :disabled="isRefining || !refinePrompt.trim()">
+                {{ isRefining ? '思考中...' : '发送' }}
+              </button>
+            </div>
+            <div v-if="refineHistory.length > 0" class="refine-history">
+              <div v-for="(rh, ri) in refineHistory.slice(-3)" :key="ri" class="refine-history-item">
+                <span class="rh-user">{{ rh.prompt }}</span>
+                <span class="rh-status" :class="rh.success ? 'ok' : 'fail'">{{ rh.success ? '✓' : '✗' }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="timeline-view">
+            <div class="day-section" v-for="(day, di) in editablePlan.dailyPlans" :key="day.dayNumber"
+              @dragover.prevent @drop="onDayDrop(day.dayNumber)">
+              <div class="day-header-card">
+                <div class="day-header-left">
+                  <div class="day-index-badge">{{ day.dayNumber }}</div>
+                  <div class="day-header-info">
+                    <span class="day-header-label">第 {{ day.dayNumber }} 天</span>
+                    <span class="day-header-sub">{{ day.items.length }} 个地点 · {{ day.items.filter(i => i.type === '美食').length }} 餐饮 · {{ day.items.filter(i => i.type === '住宿').length }} 住宿</span>
+                  </div>
+                </div>
+                <button class="btn-add-item" @click="addItem(day.dayNumber)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  添加
+                </button>
+              </div>
+              <div class="timeline-list">
+                <div class="timeline-row" v-for="(item, idx) in day.items" :key="`${day.dayNumber}-${idx}`"
+                  draggable="true" @dragstart="onDragStart(day.dayNumber, idx)"
+                  @dragover.prevent @drop.stop="onDrop(day.dayNumber, idx)"
+                  :class="`type-border-${getTypeClass(item.type)}`">
+                  <div class="timeline-thread">
+                    <div class="node-circle" :class="`bg-${getTypeClass(item.type)}`">{{ getTypeIcon(item.type) }}</div>
+                  </div>
+                  <div class="timeline-card-wrap">
+                    <div class="timeline-card">
+                      <div class="card-header-row">
+                        <div class="card-info">
+                          <div class="card-title-row">
+                            <span class="card-type-tag" :class="`tag-${getTypeClass(item.type)}`">{{ item.type }}</span>
+                            <div class="card-title">{{ item.name || '未命名路线项' }}</div>
+                            <button v-if="hasLocation(item)" class="map-link-btn" @click="openMap(item)" title="在地图中查看">
+                              📍 地图
+                            </button>
+                          </div>
+                          <div class="card-desc">{{ item.description || '暂无描述' }}</div>
+                          <div v-if="hasLocation(item) && item.location?.name" class="card-location">
+                            <span class="location-icon">📍</span>
+                            <span class="location-name">{{ item.location.name }}</span>
+                            <span v-if="formatCoordinates(item)" class="location-coords">
+                              {{ formatCoordinates(item) }}
+                            </span>
+                          </div>
+                        </div>
+                        <span class="drag-handle">⋮⋮</span>
+                      </div>
+                      <div class="card-actions-row">
+                        <button class="text-btn" @click="toggleItemEditor(day.dayNumber, idx)">
+                          {{ isItemEditing(day.dayNumber, idx) ? '收起' : '编辑' }}</button>
+                        <button class="text-btn danger" @click="removeItem(day.dayNumber, idx)">删除</button>
+                      </div>
+                      <div v-if="isItemEditing(day.dayNumber, idx)" class="embedded-editor">
+                        <div class="field-row">
+                          <select v-model="item.type" class="mini-select">
+                            <option v-for="t in routeTypeOptions" :key="t" :value="t">{{ t }}</option>
+                          </select>
+                          <input v-model.trim="item.name" placeholder="名称" class="mini-input" />
+                        </div>
+                        <textarea v-model.trim="item.description" rows="2" placeholder="描述..." class="mini-textarea" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="day.items.length === 0" class="empty-day-placeholder">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                  <span>点击上方「添加」按钮或拖拽来安排今日行程</span>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -211,6 +213,7 @@
     </div>
 
     <AgentPanel
+      :collapsed="agentPanelCollapsed"
       :is-generating="isAgentGenerating"
       :is-done="isAgentDone"
       :is-loading="isAgentLoading"
@@ -231,7 +234,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   generateItineraryStream,
   modifyItineraryStream,
@@ -255,7 +258,17 @@ interface LogEntry {
   phaseType?: string
 }
 
-const step = ref(1)
+// ===== 新增响应式状态 =====
+const showForm = ref(true)
+const agentPanelCollapsed = ref(false)
+const refineHistory = ref<Array<{ prompt: string; success: boolean }>>([])
+
+const budgetLabel = computed(() => {
+  const map: Record<string, string> = { low: '经济', medium: '舒适', high: '豪华' }
+  return map[request.budgetLevel] || '经济'
+})
+
+// ===== 原有状态 =====
 const isLoadingGenerate = ref(false)
 const generatingLogs = ref<LogEntry[]>([])
 const currentPhase = ref('')
@@ -317,10 +330,9 @@ const activeStats = computed(() => {
 
 
 
-
-// AgentPanel 组件所需的计算属性
-const isAgentGenerating = computed(() => (step.value === 1 && isLoadingGenerate.value) || (step.value === 2 && isRefining.value))
-const isAgentDone = computed(() => step.value >= 2 && !isRefining.value)
+// AgentPanel 组件所需的计算属性（不再依赖 step）
+const isAgentGenerating = computed(() => isLoadingGenerate.value || isRefining.value)
+const isAgentDone = computed(() => !!editablePlan.value && !isRefining.value)
 const isAgentLoading = computed(() => activeAgentLogs.value.length === 0 && isAgentGenerating.value)
 
 const agentTokenStats = computed(() => {
@@ -335,10 +347,20 @@ const agentTokenStats = computed(() => {
 
 const agentToolStats = computed(() => {
   if (!activeStats.value?.toolCalls) return undefined
-  return activeStats.value.toolCalls.map(tc => ({
-    name: tc.displayName,
-    displayName: tc.displayName,
-    status: tc.status === 'success' ? 'success' as const : 'skipped' as const
+  // 按工具名分组去重，合并为带调用次数的汇总记录
+  const grouped = new Map<string, { name: string; displayName: string; count: number; successCount: number }>()
+  for (const tc of activeStats.value.toolCalls) {
+    const key = tc.displayName || tc.name
+    if (!grouped.has(key)) {
+      grouped.set(key, { name: key, displayName: key, count: 0, successCount: 0 })
+    }
+    const entry = grouped.get(key)!
+    entry.count++
+    if (tc.status === 'success') entry.successCount++
+  }
+  return Array.from(grouped.values()).map(entry => ({
+    ...entry,
+    status: entry.successCount > 0 ? 'success' as const : 'skipped' as const
   }))
 })
 
@@ -463,9 +485,6 @@ const manuallyToggledThoughts = ref<Set<number>>(new Set())
 
 
 
-
-
-
 const getToolIcon = (message: string): string => {
   if (message.includes('weather')) return '🌤️'
   if (message.includes('search') || message.includes('Search')) return '🔍'
@@ -503,7 +522,7 @@ const extractToolName = (message: string): string => {
 
 
 
-// ===== 新增：位置信息和地图功能 =====
+// ===== 位置信息和地图功能 =====
 const hasLocation = (item: { location?: { lat?: number | string; lng?: number | string; name?: string } }): boolean => {
   return !!(item.location && (item.location.lat || item.location.lng || item.location.name))
 }
@@ -549,7 +568,6 @@ const isEmptyEntry = (entry: LogEntry): boolean => {
   if (trimmed.startsWith('THOUGHT:') && trimmed.replace('THOUGHT:', '').trim().length === 0) return true
   return false
 }
-
 
 
 const isJsonMessage = (msg: string): boolean => {
@@ -744,7 +762,7 @@ const handleGenerate = async () => {
       (phase: PhaseData) => { generatingLogs.value.push({ type: 'phase', message: phase.message, phaseType: phase.type }); currentPhase.value = phase.type },
       (msg: string) => { generatingLogs.value.push({ type: 'thought', message: msg }) },
       (msg: string) => { generatingLogs.value.push({ type: 'tool', message: getLogMessage(msg) }) },
-      (plan) => { editablePlan.value = normalizePlan(plan); step.value = 2; isLoadingGenerate.value = false },
+      (plan) => { editablePlan.value = normalizePlan(plan); isLoadingGenerate.value = false },
       (error) => { errorMessage.value = error.message || '生成报错，请稍后重试。'; isLoadingGenerate.value = false },
       (stats) => { generationStats.value = stats },
       (convId) => { activeConversationId.value = convId }
@@ -752,22 +770,13 @@ const handleGenerate = async () => {
   } catch (error: any) { errorMessage.value = '生成失败，请稍后重试。'; isLoadingGenerate.value = false }
 }
 
-const handleGoBackToStep1 = async () => {
-  if (!editablePlan.value) { step.value = 1; return }
-  try {
-    await ElMessageBox.confirm(
-      '返回后将离开当前编辑页面，未保存的修改可能丢失。建议先保存方案。',
-      '确认返回',
-      { confirmButtonText: '继续返回', cancelButtonText: '留下编辑', type: 'info' }
-    )
-  } catch {
-    return
-  }
-  step.value = 1
+const handleAiRefineQuick = () => {
+  handleAiRefine()
 }
 
 const handleAiRefine = async () => {
   if (!refinePrompt.value.trim() || !editablePlan.value) return
+  const promptText = refinePrompt.value.trim()
   isRefining.value = true; refineLogs.value = []; refineCurrentPhase.value = ''; refineStats.value = null
   const originalPlan = { ...editablePlan.value }
 
@@ -775,7 +784,7 @@ const handleAiRefine = async () => {
     await modifyItineraryStream(
       { ...request },
       { ...editablePlan.value },
-      refinePrompt.value,
+      promptText,
       activeConversationId.value,
       (phase: PhaseData) => { refineLogs.value.push({ type: 'phase', message: phase.message, phaseType: phase.type }); refineCurrentPhase.value = phase.type },
       (msg: string) => { refineLogs.value.push({ type: 'thought', message: msg }) },
@@ -784,11 +793,20 @@ const handleAiRefine = async () => {
         editablePlan.value = mergeRefinedPlan(originalPlan, normalizePlan(plan))
         isRefining.value = false
         refinePrompt.value = ''
+        refineHistory.value.push({ prompt: promptText, success: true })
       },
-      (error: any) => { ElMessageBox.alert(error.message || '修改报错', 'AI修改失败', { type: 'error' }); isRefining.value = false },
+      (error: any) => {
+        ElMessageBox.alert(error.message || '修改报错', 'AI修改失败', { type: 'error' })
+        isRefining.value = false
+        refineHistory.value.push({ prompt: promptText, success: false })
+      },
       (stats: GenerationStats) => { refineStats.value = stats }
     )
-  } catch (error: any) { ElMessageBox.alert(error.message || '修改失败', 'AI修改失败', { type: 'error' }); isRefining.value = false }
+  } catch (error: any) {
+    ElMessageBox.alert(error.message || '修改失败', 'AI修改失败', { type: 'error' })
+    isRefining.value = false
+    refineHistory.value.push({ prompt: promptText, success: false })
+  }
 }
 
 const addItem = (dn: number) => {
@@ -845,7 +863,7 @@ const loadDetailForEdit = async () => {
     const plan = normalizePlan(r.data.data.plan)
     editablePlan.value = plan
     loadedStats.value = r.data.data.stats || null
-    savedItineraryId.value = r.data.data.id; step.value = 2
+    savedItineraryId.value = r.data.data.id
     if (plan.destination) request.destination = plan.destination
     if (plan.totalDays) request.days = plan.totalDays
     try {
@@ -872,22 +890,21 @@ const savePlan = async () => {
   try {
     if (isEditMode.value) {
       await updateItinerary(itineraryId.value, { ...editablePlan.value, destination: request.destination.trim(), stats })
-      savedItineraryId.value = itineraryId.value; step.value = 3
+      savedItineraryId.value = itineraryId.value
     } else {
       const r = await saveItinerary({ ...editablePlan.value, destination: request.destination.trim(), dailyPlans: editablePlan.value.dailyPlans, stats })
-      savedItineraryId.value = r.data.data; step.value = 3
+      savedItineraryId.value = r.data.data
       if (activeConversationId.value && savedItineraryId.value) {
         linkItinerary(activeConversationId.value, savedItineraryId.value).catch(() => {})
       }
     }
+    ElMessage.success(isEditMode.value ? '方案已更新！' : '方案已保存！')
   } catch { errorMessage.value = '保存失败，请稍后重试。' } finally { isSaving.value = false }
 }
 
-const continueEditing = () => { step.value = 2 }
-const goBackToList = () => { router.push('/battle') }
-
 onMounted(async () => {
   if (route.query.destination) request.destination = String(route.query.destination)
+  if (route.query.convId) activeConversationId.value = String(route.query.convId)
   if (itineraryId.value) await loadDetailForEdit()
 })
 </script>
@@ -939,6 +956,35 @@ onMounted(async () => {
   background: #F0F7FF;
 }
 
+/* Header extras */
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.top-bar-toggle-form,
+.top-bar-toggle-panel {
+  padding: 4px 10px;
+  border: 1px solid rgba(51, 133, 255, 0.15);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  color: #5B7FA5;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.top-bar-toggle-form:hover,
+.top-bar-toggle-panel:hover {
+  border-color: #3385FF;
+  color: #3385FF;
+}
+.top-bar-toggle-form.active {
+  background: rgba(51, 133, 255, 0.08);
+  color: #3385FF;
+}
+
 .content-scroll {
   flex: 1;
   overflow-y: auto;
@@ -959,6 +1005,48 @@ onMounted(async () => {
   font-size: 18px;
   font-weight: 700;
   color: #1E3A5F;
+}
+
+/* Form collapsible */
+.form-section {
+  transition: all 0.25s ease;
+  overflow: hidden;
+}
+.form-collapsed {
+  margin-bottom: 12px;
+  padding: 0;
+}
+.form-collapsed .form-section-body {
+  display: none;
+}
+.form-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #F8FAFD 0%, #F0F4F8 100%);
+  border: 1px solid rgba(51, 133, 255, 0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.form-section-header:hover {
+  border-color: rgba(51, 133, 255, 0.2);
+}
+.form-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1E3A5F;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.form-section-title svg {
+  color: #3385FF;
+}
+.form-section-arrow {
+  font-size: 11px;
+  color: #94A3B8;
 }
 
 .edit-plan-header {
@@ -1041,6 +1129,23 @@ onMounted(async () => {
   padding: 10px 18px;
   font-size: 13px;
   white-space: nowrap;
+}
+
+.eph-conv-link {
+  background: transparent;
+  border: 1.5px solid rgba(255, 149, 0, 0.2);
+  color: #D97706;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.eph-conv-link:hover {
+  background: rgba(255, 149, 0, 0.05);
+  border-color: rgba(255, 149, 0, 0.4);
 }
 
 .form-cols {
@@ -1308,6 +1413,22 @@ textarea:focus { background: rgba(51, 133, 255, 0.03); border-radius: 6px; }
   color: #94a3b8;
 }
 
+/* AI chat-style input */
+.ai-chat-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.ai-chat-input-row textarea {
+  flex: 1;
+  min-height: 40px;
+}
+.ai-chat-input-row .ai-send-btn {
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 16px;
+}
+
 .ai-refine-box textarea {
   width: 100%;
   border: none;
@@ -1328,17 +1449,41 @@ textarea:focus { background: rgba(51, 133, 255, 0.03); border-radius: 6px; }
   border-radius: 6px;
 }
 
-.ai-refine-actions {
-  margin-top: 12px;
-  display: flex;
-  justify-content: flex-end;
-}
-
 .ai-send-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
+
+/* Refine history */
+.refine-history {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.refine-history-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 4px 8px;
+  background: #F8FAFD;
+  border-radius: 6px;
+}
+.rh-user {
+  color: #3385FF;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rh-status { font-size: 10px; }
+.rh-status.ok { color: #22C55E; }
+.rh-status.fail { color: #EF4444; }
 
 .empty {
   border: 2px dashed rgba(51, 133, 255, 0.15);
@@ -1650,94 +1795,6 @@ textarea:focus { background: rgba(51, 133, 255, 0.03); border-radius: 6px; }
   background: #fafcff;
 }
 
-.saved-preview {
-  border: 1px solid rgba(51, 133, 255, 0.1);
-  border-radius: 16px;
-  padding: 24px;
-}
-
-.saved-preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgba(51, 133, 255, 0.08);
-}
-
-.saved-preview-header h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.saved-tag {
-  border-radius: 20px;
-  background: #dcfce7;
-  color: #166534;
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.saved-overview {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin-bottom: 20px;
-  background: #FAFCFF;
-  padding: 16px;
-  border-radius: 12px;
-}
-
-.saved-overview p {
-  margin: 0;
-  font-size: 14px;
-  color: #6B8CBE;
-}
-
-.saved-overview strong {
-  color: #1E3A5F;
-  font-weight: 600;
-}
-
-.preview-days {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.preview-day {
-  border: 1px solid rgba(51, 133, 255, 0.08);
-  border-radius: 12px;
-  padding: 16px;
-}
-
-.preview-day-title {
-  margin: 0 0 10px;
-  font-size: 15px;
-  font-weight: 700;
-  color: #3385FF;
-}
-
-.preview-day ul {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.preview-day li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  padding: 8px 12px;
-  background: #FAFCFF;
-  border-radius: 8px;
-}
-
 .bg-spot { background: #e0f2fe; color: #0284c7; }
 .bg-food { background: #ffedd5; color: #ea580c; }
 .bg-traffic { background: #f3e8ff; color: #7c3aed; }
@@ -1746,24 +1803,8 @@ textarea:focus { background: rgba(51, 133, 255, 0.03); border-radius: 6px; }
 .bg-shopping { background: #fce7f3; color: #db2777; }
 .bg-default { background: #f1f5f9; color: #475569; }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/* Panel collapse */
+.customize-main.with-panel {
+  /* keep existing layout when panel is visible */
+}
 </style>

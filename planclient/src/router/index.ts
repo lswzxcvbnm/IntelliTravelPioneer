@@ -8,6 +8,8 @@ const BattleCustomizePlan = () => import('../views/battle/BattleCustomizePlan.vu
 const ToolsManagement = () => import('../views/battle/ToolsManagement.vue')
 const SkillManage = () => import('../views/battle/SkillManage.vue')
 
+const Workspace = () => import('../views/workspace/Workspace.vue')
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   scrollBehavior(_to, _from, savedPosition) {
@@ -63,6 +65,11 @@ const router = createRouter({
       path: '/conversation/:id',
       name: 'ConversationDetail',
       component: () => import('../views/conversation/ConversationDetail.vue')
+    },
+    {
+      path: '/workspace',
+      name: 'Workspace',
+      component: Workspace
     }
   ]
 })
@@ -72,7 +79,8 @@ const routesRequireAuth = [
   '/battle/skills',
   '/battle/create',
   '/tools',
-  '/conversation'
+  '/conversation',
+  '/workspace'
 ]
 
 router.beforeEach((to, _from, next) => {

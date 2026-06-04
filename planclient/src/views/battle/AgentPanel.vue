@@ -1,5 +1,12 @@
 <template>
-  <aside class="agent-panel" :class="{ 'is-generating': isGenerating, 'is-done': isDone }">
+  <!-- 折叠态：悬浮小药丸 -->
+  <div v-if="collapsed" class="ap-collapsed-pill" @click="$emit('toggle-collapse')">
+    <span class="ap-collapsed-icon">{{ collapsedIcon }}</span>
+    <span class="ap-collapsed-label">{{ statusText }}</span>
+  </div>
+
+  <!-- 展开态：完整面板 -->
+  <aside v-else class="agent-panel" :class="{ 'is-generating': isGenerating, 'is-done': isDone }">
     <!-- 头部状态栏 -->
     <header class="ap-head">
       <div class="ap-head-status">
@@ -41,7 +48,7 @@
       </div>
 
       <!-- 当前动作 -->
-      <div class="ap-action" v-if="currentAction">
+      <div class="ap-action" v-show="isLoading || currentAction">
         <div class="ap-action-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
@@ -49,7 +56,9 @@
         </div>
         <div class="ap-action-content">
           <span class="ap-action-label">当前操作</span>
-          <span class="ap-action-text">{{ currentAction }}</span>
+          <transition name="action-fade" mode="out-in">
+            <span class="ap-action-text" :key="currentAction || 'idle'">{{ currentAction || '等待 AI 响应...' }}</span>
+          </transition>
         </div>
       </div>
 
@@ -142,119 +151,125 @@
 
     <!-- 完成状态 -->
     <template v-else-if="isDone">
-      <!-- 完成指标 -->
-      <div class="ap-done-metrics">
-        <div class="ap-metric">
-          <div class="ap-metric-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-              <line x1="16" y1="2" x2="16" y2="6"/>
-              <line x1="8" y1="2" x2="8" y2="6"/>
-              <line x1="3" y1="10" x2="21" y2="10"/>
-            </svg>
-          </div>
-          <div class="ap-metric-content">
-            <span class="ap-metric-value">{{ totalDays }}</span>
-            <span class="ap-metric-label">天</span>
-          </div>
+      <!-- 完成指标（紧凑摘要条） -->
+      <div class="ap-done-summary-bar">
+        <div class="ap-summary-item" v-if="totalDays">
+          <span class="ap-summary-value">{{ totalDays }}</span>
+          <span class="ap-summary-label">天</span>
         </div>
-        <div class="ap-metric">
-          <div class="ap-metric-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
-              <line x1="9" y1="3" x2="9" y2="18"/>
-              <line x1="15" y1="6" x2="15" y2="21"/>
-            </svg>
-          </div>
-          <div class="ap-metric-content">
-            <span class="ap-metric-value">{{ routeCount }}</span>
-            <span class="ap-metric-label">路线</span>
-          </div>
+        <div class="ap-summary-item" v-if="routeCount">
+          <span class="ap-summary-value">{{ routeCount }}</span>
+          <span class="ap-summary-label">地点</span>
         </div>
-        <div class="ap-metric">
-          <div class="ap-metric-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="12" y1="1" x2="12" y2="23"/>
-              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-            </svg>
-          </div>
-          <div class="ap-metric-content">
-            <span class="ap-metric-value">{{ formattedBudget }}</span>
-            <span class="ap-metric-label">预算</span>
-          </div>
+        <div class="ap-summary-item" v-if="budget">
+          <span class="ap-summary-value">¥{{ formattedBudget }}</span>
+          <span class="ap-summary-label">预算</span>
         </div>
-        <div class="ap-metric" v-if="totalTokens">
-          <div class="ap-metric-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-            </svg>
-          </div>
-          <div class="ap-metric-content">
-            <span class="ap-metric-value">{{ totalTokens.toLocaleString() }}</span>
-            <span class="ap-metric-label">Tokens</span>
-          </div>
+        <div class="ap-summary-item" v-if="totalTokens">
+          <span class="ap-summary-value">{{ formatCompactNumber(totalTokens) }}</span>
+          <span class="ap-summary-label">Tokens</span>
         </div>
+        <div class="ap-summary-spacer"></div>
+        <button
+          class="ap-replay-toggle"
+          :class="{ active: showReplay }"
+          @click="showReplay = !showReplay"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          {{ showReplay ? '收起过程' : '过程回放' }}
+        </button>
       </div>
 
-      <!-- Token 消耗 -->
-      <div class="ap-done-section" v-if="tokenStats">
-        <div class="ap-done-section-head">
-          <h4 class="ap-done-section-title">Token 消耗</h4>
-          <span class="ap-done-section-badge">{{ tokenStats.apiCalls }} 次调用</span>
-        </div>
-        <div class="ap-token-bar">
-          <div class="ap-token-segment prompt" :style="{ width: tokenPromptPercent + '%' }"></div>
-          <div class="ap-token-segment completion" :style="{ width: tokenCompletionPercent + '%' }"></div>
-        </div>
-        <div class="ap-token-legend">
-          <div class="ap-token-item">
-            <span class="ap-token-dot prompt"></span>
-            <span class="ap-token-text">提示 {{ tokenStats.promptTokens.toLocaleString() }}</span>
+      <!-- 过程回放（可折叠） -->
+      <transition name="replay-slide">
+        <div v-if="showReplay" class="ap-replay-panel">
+          <!-- Token 消耗 -->
+          <div class="ap-done-section" v-if="tokenStats">
+            <div class="ap-done-section-head">
+              <h4 class="ap-done-section-title">Token 消耗</h4>
+              <span class="ap-done-section-badge">{{ tokenStats.apiCalls }} 次调用</span>
+            </div>
+            <div class="ap-token-bar">
+              <div class="ap-token-segment prompt" :style="{ width: tokenPromptPercent + '%' }"></div>
+              <div class="ap-token-segment completion" :style="{ width: tokenCompletionPercent + '%' }"></div>
+            </div>
+            <div class="ap-token-legend">
+              <div class="ap-token-item">
+                <span class="ap-token-dot prompt"></span>
+                <span class="ap-token-text">提示 {{ tokenStats.promptTokens.toLocaleString() }}</span>
+              </div>
+              <div class="ap-token-item">
+                <span class="ap-token-dot completion"></span>
+                <span class="ap-token-text">生成 {{ tokenStats.completionTokens.toLocaleString() }}</span>
+              </div>
+            </div>
           </div>
-          <div class="ap-token-item">
-            <span class="ap-token-dot completion"></span>
-            <span class="ap-token-text">生成 {{ tokenStats.completionTokens.toLocaleString() }}</span>
-          </div>
-        </div>
-      </div>
 
-      <!-- 工具调用统计 -->
-      <div class="ap-done-section" v-if="toolStats && toolStats.length > 0">
-        <div class=" ap-done-section-head">
-          <h4 class="ap-done-section-title">工具调用</h4>
-          <span class="ap-done-section-badge">{{ toolStats.length }} 个工具</span>
-        </div>
-        <div class="ap-done-tools">
-          <div 
-            v-for="tool in toolStats" 
-            :key="tool.name"
-            class="ap-done-tool"
-          >
-            <span class="ap-tool-dot" :class="tool.status"></span>
-            <span class="ap-done-tool-name">{{ tool.displayName }}</span>
+          <!-- 工具调用统计 -->
+          <div class="ap-done-section" v-if="toolStats && toolStats.length > 0">
+            <div class=" ap-done-section-head">
+              <h4 class="ap-done-section-title">工具调用</h4>
+              <span class="ap-done-section-badge">{{ toolTotalCalls }} 次调用</span>
+            </div>
+            <div class="ap-done-tools">
+              <div
+                v-for="tool in toolStats"
+                :key="tool.name"
+                class="ap-done-tool"
+              >
+                <span class="ap-tool-dot" :class="tool.status"></span>
+                <span class="ap-done-tool-name">{{ tool.displayName }}</span>
+                <span class="ap-done-tool-count">×{{ tool.count }}</span>
+              </div>
+            </div>
+            <div class="ap-tool-stats-row">
+              <span class="ap-tool-stat success">{{ toolSuccessCount }} 成功</span>
+              <span class="ap-tool-stat skipped" v-if="toolSkippedCount > 0">{{ toolSkippedCount }} 跳过</span>
+            </div>
           </div>
-        </div>
-        <div class="ap-tool-stats-row">
-          <span class="ap-tool-stat success">{{ toolSuccessCount }} 成功</span>
-          <span class="ap-tool-stat skipped" v-if="toolSkippedCount > 0">{{ toolSkippedCount }} 跳过</span>
-        </div>
-      </div>
 
-      <!-- 执行记录 -->
-      <div class="ap-done-section" v-if="showLogs && executionLogs && executionLogs.length > 0">
-        <div class="ap-done-section-head">
-          <h4 class="ap-done-section-title">执行记录</h4>
-        </div>
-        <div class="ap-done-fulllog">
-          <div 
-            v-for="(log, index) in executionLogs" 
-            :key="index"
-            class="ap-done-log"
-            :class="log.type"
-          >
-            <span class="ap-done-log-icon">{{ log.icon }}</span>
-            <span class="ap-done-log-text">{{ log.text }}</span>
+          <!-- 执行记录时间线 -->
+          <div class="ap-done-section" v-if="executionLogs && executionLogs.length > 0">
+            <div class="ap-done-section-head">
+              <h4 class="ap-done-section-title">执行过程</h4>
+              <span class="ap-done-section-badge">{{ executionLogs.length }} 条记录</span>
+            </div>
+            <div class="ap-timeline">
+              <div
+                v-for="(log, index) in executionLogs"
+                :key="index"
+                class="ap-timeline-item"
+                :class="log.type"
+                @click="toggleTimelineItem(index)"
+              >
+                <div class="ap-timeline-marker">
+                  <span class="ap-timeline-icon">{{ log.icon }}</span>
+                </div>
+                <div class="ap-timeline-content">
+                  <span class="ap-timeline-text" :class="{ expanded: expandedTimelineItems.has(index) }">
+                    {{ log.text }}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
+
+          <!-- 无执行记录时的占位 -->
+          <div v-else class="ap-replay-empty">
+            <p>本次生成暂无可回放的执行记录</p>
+          </div>
+        </div>
+      </transition>
+
+      <!-- 收起态：快捷操作入口 -->
+      <div v-if="!showReplay" class="ap-quick-actions">
+        <div class="ap-quick-action" v-if="toolStats && toolStats.length > 0" @click="showReplay = true">
+          <span>🔧 {{ toolTotalCalls }} 次工具调用</span>
+        </div>
+        <div class="ap-quick-action" v-if="tokenStats" @click="showReplay = true">
+          <span>⚡ {{ formatCompactNumber(totalTokens) }} Tokens</span>
         </div>
       </div>
     </template>
@@ -325,6 +340,8 @@ interface ToolStat {
   name: string
   displayName: string
   status: 'success' | 'skipped'
+  count: number
+  successCount: number
 }
 
 interface TokenStats {
@@ -348,17 +365,21 @@ const props = defineProps<{
   toolStats?: ToolStat[]
   executionLogs?: Array<{ type: string; icon: string; text: string }>
   showLogs?: boolean
+  collapsed?: boolean
 }>()
 
 // Emits
 const emit = defineEmits<{
   'toggle-logs': []
+  'toggle-collapse': []
 }>()
 
 // 状态
 const logsContainer = ref<HTMLElement | null>(null)
 const expandedGroups = ref<Set<string>>(new Set())
 const expandedThoughts = ref<Set<number>>(new Set())
+const showReplay = ref(false)
+const expandedTimelineItems = ref<Set<number>>(new Set())
 
 // 计算属性
 const statusClass = computed(() => {
@@ -371,6 +392,12 @@ const statusText = computed(() => {
   if (props.isGenerating) return 'Agent 正在生成方案'
   if (props.isDone) return '生成完成'
   return 'Agent 就绪'
+})
+
+const collapsedIcon = computed(() => {
+  if (props.isGenerating) return '🎯'
+  if (props.isDone) return '✅'
+  return '🤖'
 })
 
 const progressSteps = computed<ProgressStep[]>(() => {
@@ -441,7 +468,7 @@ const formattedBudget = computed(() => {
   return `¥${props.budget.toLocaleString()}`
 })
 
-const totalTokens = computed(() => props.tokenStats?.totalTokens)
+const totalTokens = computed(() => props.tokenStats?.totalTokens || 0)
 
 const tokenPromptPercent = computed(() => {
   if (!props.tokenStats) return 0
@@ -453,11 +480,15 @@ const tokenCompletionPercent = computed(() => {
   return (props.tokenStats.completionTokens / props.tokenStats.totalTokens) * 100
 })
 
-const toolSuccessCount = computed(() => 
+const toolTotalCalls = computed(() =>
+  props.toolStats?.reduce((sum, t) => sum + (t.count || 0), 0) || 0
+)
+
+const toolSuccessCount = computed(() =>
   props.toolStats?.filter(tool => tool.status === 'success').length || 0
 )
 
-const toolSkippedCount = computed(() => 
+const toolSkippedCount = computed(() =>
   props.toolStats?.filter(tool => tool.status === 'skipped').length || 0
 )
 
@@ -479,6 +510,20 @@ const toggleThoughtExpand = (index: number) => {
 }
 
 const isThoughtExpanded = (index: number) => expandedThoughts.value.has(index)
+
+const toggleTimelineItem = (index: number) => {
+  if (expandedTimelineItems.value.has(index)) {
+    expandedTimelineItems.value.delete(index)
+  } else {
+    expandedTimelineItems.value.add(index)
+  }
+}
+
+const formatCompactNumber = (n: number): string => {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
+  return String(n)
+}
 
 const isEmptyEntry = (entry: LogEntry) => !entry.message || entry.message.trim() === ''
 
@@ -553,3 +598,254 @@ watch(() => props.logs.length, async () => {
   }
 })
 </script>
+
+<style scoped>
+.ap-done-tool-count {
+  font-size: 11px;
+  color: #94A3B8;
+  background: #F1F5F9;
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: 4px;
+}
+
+.action-fade-enter-active,
+.action-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.action-fade-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.action-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* ====== 完成态：过程回放 ====== */
+.ap-done-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%);
+  border: 1px solid rgba(34, 197, 94, 0.15);
+  border-radius: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.ap-summary-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.ap-summary-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #166534;
+}
+
+.ap-summary-label {
+  font-size: 10px;
+  color: #6B8F71;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.ap-summary-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.ap-replay-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border: 1.5px solid rgba(51, 133, 255, 0.25);
+  border-radius: 20px;
+  background: transparent;
+  color: #3385FF;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.ap-replay-toggle:hover {
+  background: rgba(51, 133, 255, 0.06);
+  border-color: #3385FF;
+}
+
+.ap-replay-toggle.active {
+  background: rgba(51, 133, 255, 0.08);
+  border-color: #3385FF;
+}
+
+.ap-replay-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.replay-slide-enter-active,
+.replay-slide-leave-active {
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.replay-slide-enter-from,
+.replay-slide-leave-to {
+  opacity: 0;
+  max-height: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.ap-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ap-timeline-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.ap-timeline-item:hover {
+  background: rgba(51, 133, 255, 0.04);
+}
+
+.ap-timeline-marker {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: #F1F5F9;
+  font-size: 11px;
+}
+
+.ap-timeline-item.phase .ap-timeline-marker {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.ap-timeline-item.tool .ap-timeline-marker {
+  background: rgba(51, 133, 255, 0.08);
+}
+
+.ap-timeline-item.thought .ap-timeline-marker {
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.ap-timeline-icon {
+  font-size: 11px;
+}
+
+.ap-timeline-content {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.ap-timeline-text {
+  font-size: 12px;
+  color: #5B7FA5;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.ap-timeline-text.expanded {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+
+.ap-replay-empty {
+  text-align: center;
+  padding: 20px 12px;
+  color: #94A3B8;
+  font-size: 13px;
+}
+
+.ap-quick-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.ap-quick-action {
+  padding: 6px 12px;
+  background: #FAFBFC;
+  border: 1px solid rgba(51, 133, 255, 0.08);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #5B7FA5;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ap-quick-action:hover {
+  background: rgba(51, 133, 255, 0.05);
+  border-color: rgba(51, 133, 255, 0.18);
+  color: #3385FF;
+}
+
+/* ====== 折叠态小药丸 ====== */
+.ap-collapsed-pill {
+  position: fixed;
+  right: 16px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, #1A6FFF 0%, #3385FF 100%);
+  color: #fff;
+  border-radius: 20px;
+  box-shadow: 0 4px 12px rgba(51, 133, 255, 0.3);
+  cursor: pointer;
+  z-index: 100;
+  transition: all 0.2s ease;
+  animation: ap-pill-bounce 2s ease infinite;
+}
+
+.ap-collapsed-pill:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(51, 133, 255, 0.4);
+}
+
+.ap-collapsed-icon {
+  font-size: 16px;
+}
+
+.ap-collapsed-label {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@keyframes ap-pill-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+</style>

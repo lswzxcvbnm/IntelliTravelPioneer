@@ -21,6 +21,7 @@ const navItems = [
   { path: '/battle/skills', label: '技能工作台', icon: '🧩' },
   { path: '/tools', label: '工具管理', icon: '🔧' },
   { path: '/conversation', label: 'AI 对话', icon: '💬' },
+  { path: '/workspace', label: 'AI 工作台', icon: '🚀' },
 ]
 
 const goCreate = () => {
