@@ -1,4 +1,5 @@
 import { ref, nextTick } from 'vue'
+import { getConversationDetail, type AgentMessageVO } from '../api/conversation'
 
 export interface WsMessage {
   id: string
@@ -9,9 +10,22 @@ export interface WsMessage {
   streaming?: boolean
 }
 
+/** 将服务端 AgentMessageVO 转换为前端 WsMessage */
+function toWsMessage(msg: AgentMessageVO): WsMessage {
+  return {
+    id: msg.id,
+    role: msg.role as 'user' | 'assistant',
+    content: msg.content || '',
+    time: new Date(msg.createTime),
+    toolCalls: msg.toolCalls,
+    streaming: false,
+  }
+}
+
 export function useConversation() {
   const messages = ref<WsMessage[]>([])
   const messagesRef = ref<HTMLElement | null>(null)
+  const isLoadingHistory = ref(false)
 
   // 添加用户消息
   function addUserMessage(content: string): string {
@@ -125,9 +139,50 @@ export function useConversation() {
     return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   }
 
+  /**
+   * 从服务器加载历史对话，返回 conversation 信息和关联行程ID
+   */
+  async function loadConversationHistory(convId: string): Promise<{
+    itineraryId: string | null
+    title: string | null
+  }> {
+    isLoadingHistory.value = true
+    try {
+      const res = await getConversationDetail(convId)
+      if (res.data?.code === '200' && res.data.data) {
+        const detail = res.data.data
+        const serverMessages = (detail.messages || [])
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(toWsMessage)
+
+        // 仅在消息列表为空时加载，避免覆盖当前进行中的对话
+        if (messages.value.length === 0) {
+          messages.value = serverMessages
+        }
+
+        return {
+          itineraryId: detail.conversation?.itineraryId || null,
+          title: detail.conversation?.title || null,
+        }
+      }
+      return { itineraryId: null, title: null }
+    } catch {
+      return { itineraryId: null, title: null }
+    } finally {
+      isLoadingHistory.value = false
+      await scrollToBottom()
+    }
+  }
+
+  /** 清空消息列表 */
+  function clearMessages() {
+    messages.value = []
+  }
+
   return {
     messages,
     messagesRef,
+    isLoadingHistory,
     addUserMessage,
     addAssistantMessage,
     updateMessage,
@@ -136,5 +191,7 @@ export function useConversation() {
     scrollToBottom,
     formatContent,
     formatTime,
+    loadConversationHistory,
+    clearMessages,
   }
 }

@@ -214,6 +214,15 @@ function goToItinerary() {
     }
 }
 
+function continueInWorkspace() {
+    const params = new URLSearchParams()
+    params.set('convId', conversationId)
+    if (conversation.value?.itineraryId) {
+        params.set('itineraryId', conversation.value.itineraryId)
+    }
+    router.push(`/workspace?${params.toString()}`)
+}
+
 function goNewPlan() {
     router.push('/battle/create')
 }
@@ -264,11 +273,19 @@ onMounted(() => {
             </div>
             <div class="chat-header-actions">
                 <el-button
-                    v-if="conversation?.itineraryId"
                     type="primary"
                     size="small"
-                    @click="goToItinerary"
+                    @click="continueInWorkspace"
                     class="action-btn"
+                    title="在工作台中继续此对话"
+                >
+                    🚀 继续规划
+                </el-button>
+                <el-button
+                    v-if="conversation?.itineraryId"
+                    size="small"
+                    @click="goToItinerary"
+                    class="action-btn-outline"
                 >
                     📋 查看行程
                 </el-button>

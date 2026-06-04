@@ -56,7 +56,13 @@ async function handleCreate() {
 }
 
 function handleEnter(conv: ConversationVO) {
-    router.push(`/conversation/${conv.id}`)
+    // 跳转到工作台，延续对话
+    const params = new URLSearchParams()
+    params.set('convId', conv.id)
+    if (conv.itineraryId) {
+        params.set('itineraryId', conv.itineraryId)
+    }
+    router.push(`/workspace?${params.toString()}`)
 }
 
 async function handleDelete(conv: ConversationVO) {

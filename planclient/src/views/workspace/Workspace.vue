@@ -254,10 +254,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { generateItineraryStream, modifyItineraryStream } from '../../api/itinerary'
+import { generateItineraryStream, modifyItineraryStream, saveItinerary, updateItinerary } from '../../api/itinerary'
 import type { ItineraryRequest, ItineraryPlan, GenerationStats } from '../../api/itinerary'
+import { linkItinerary } from '../../api/conversation'
 import { goBackByAppRule } from '../../composables/useBackHandler'
 import { useConversation } from '../../composables/useConversation'
 import { useItinerary } from '../../composables/useItinerary'
@@ -274,11 +275,11 @@ const goBack = () => goBackByAppRule(router)
 const {
   messages, messagesRef, addUserMessage, addAssistantMessage,
   updateMessage, appendToMessage, finalizeMessage, scrollToBottom,
-  formatContent, formatTime,
+  formatContent, formatTime, loadConversationHistory, isLoadingHistory,
 } = useConversation()
 
 const {
-  editablePlan, isSaving, convId, totalItems,
+  editablePlan, isSaving, itineraryId, convId, totalItems,
   normalizePlan, mergeRefinedPlan, saveFromWorkspace, loadDetailForEdit,
   deleteItem,
 } = useItinerary()
@@ -308,7 +309,8 @@ const liveLogs = ref<Array<{ type: string; icon: string; text: string }>>([])
 const activeStats = ref<GenerationStats | null>(null)
 
 // ===== 输入模式（表单 / 对话） =====
-const inputMode = ref<'form' | 'chat'>('form')
+// 如果是延续对话（有 convId），默认使用对话模式
+const inputMode = ref<'form' | 'chat'>(route.query.convId ? 'chat' : 'form')
 
 const inputModes = [
   { value: 'form' as const, label: '表单输入', icon: '📋' },
@@ -456,7 +458,8 @@ async function handleFormSubmit(request: {
         if (stats.toolCalls?.length) {
           updateMessage(assistMsgId, { toolCalls: JSON.stringify(stats.toolCalls) })
         }
-      }
+      },
+      (cid) => { convId.value = cid }
     )
     finalizeMessage(assistMsgId)
   } catch (e: any) {
@@ -498,9 +501,6 @@ async function runGenerate(msgId: string, userPrompt: string) {
       },
       (stats) => {
         activeStats.value = stats
-        if (stats.toolCalls?.length) {
-          updateMessage(msgId, { toolCalls: JSON.stringify(stats.toolCalls) })
-        }
       },
       (cid) => { convId.value = cid }
     )
@@ -545,9 +545,6 @@ async function runRefine(msgId: string, userPrompt: string) {
       },
       (stats) => {
         activeStats.value = stats
-        if (stats.toolCalls?.length) {
-          updateMessage(msgId, { toolCalls: JSON.stringify(stats.toolCalls) })
-        }
       },
       (cid) => { convId.value = cid }
     )
@@ -563,6 +560,49 @@ async function runRefine(msgId: string, userPrompt: string) {
 // ===== 辅助方法 =====
 function addLog(type: string, icon: string, text: string) {
   liveLogs.value.push({ type, icon, text: text.slice(0, 200) })
+}
+
+/** 自动保存行程并关联到对话 */
+async function autoSaveAndLinkItinerary() {
+  console.log('[Workspace] autoSaveAndLinkItinerary called - editablePlan:', !!editablePlan.value, 'convId:', convId.value, 'itineraryId:', itineraryId.value)
+  
+  if (!editablePlan.value || !convId.value) {
+    console.log('[Workspace] autoSaveAndLinkItinerary skipped - missing editablePlan or convId')
+    return
+  }
+
+  try {
+    const itineraryData = {
+      title: editablePlan.value.title,
+      estimatedCost: editablePlan.value.estimatedCost,
+      totalDays: editablePlan.value.totalDays,
+      destination: editablePlan.value.destination || '',
+      dailyPlans: editablePlan.value.dailyPlans,
+    }
+
+    if (itineraryId.value) {
+      // 更新已有行程
+      console.log('[Workspace] updating existing itinerary:', itineraryId.value)
+      await updateItinerary(itineraryId.value, itineraryData)
+      console.log('[Workspace] itinerary updated successfully')
+    } else {
+      // 创建新行程
+      console.log('[Workspace] creating new itinerary...')
+      const res = await saveItinerary(itineraryData)
+      const newItineraryId = res.data.data
+      console.log('[Workspace] itinerary created, newItineraryId:', newItineraryId)
+      
+      if (newItineraryId) {
+        itineraryId.value = newItineraryId
+        // 关联行程到对话
+        console.log('[Workspace] linking itinerary to conversation...')
+        await linkItinerary(convId.value, newItineraryId)
+        console.log('[Workspace] auto saved itinerary and linked to conversation:', newItineraryId)
+      }
+    }
+  } catch (e) {
+    console.warn('[Workspace] auto save itinerary failed:', e)
+  }
 }
 
 function extractActionFromLog(msg: string): string {
@@ -687,12 +727,49 @@ async function handleSave() {
 
 // ===== 生命周期 =====
 onMounted(async () => {
-  if (route.query.itineraryId) {
-    await loadDetailForEdit(String(route.query.itineraryId))
+  const queryConvId = route.query.convId ? String(route.query.convId) : null
+  const queryItineraryId = route.query.itineraryId ? String(route.query.itineraryId) : null
+
+  console.log('[Workspace] onMounted - convId:', queryConvId, 'itineraryId:', queryItineraryId)
+
+  // 优先从 convId 加载：恢复对话历史 + 关联行程
+  if (queryConvId) {
+    convId.value = queryConvId
+    const { itineraryId: linkedItineraryId } = await loadConversationHistory(queryConvId)
+
+    console.log('[Workspace] loaded history - linkedItineraryId:', linkedItineraryId)
+
+    // 确定要加载的行程 ID：URL 参数优先，其次是对话关联的行程
+    const effectiveItineraryId = queryItineraryId || linkedItineraryId
+
+    if (effectiveItineraryId) {
+      // 有保存的行程，从服务器加载
+      console.log('[Workspace] loading itinerary from server:', effectiveItineraryId)
+      await loadDetailForEdit(effectiveItineraryId)
+    }
+  } else if (queryItineraryId) {
+    await loadDetailForEdit(queryItineraryId)
   }
-  if (route.query.convId) {
-    convId.value = String(route.query.convId)
+
+  // 如果已有行程或有历史对话，自动切换到对话模式
+  if (editablePlan.value || messages.value.length > 0) {
+    console.log('[Workspace] switching to chat mode, editablePlan:', !!editablePlan.value, 'messages:', messages.value.length)
+    inputMode.value = 'chat'
   }
+})
+
+// 退出工作台页面时自动保存行程并关联到对话
+// 使用 onBeforeRouteLeave 处理 Vue Router 导航（点击返回按钮等）
+onBeforeRouteLeave(async (to, from, next) => {
+  console.log('[Workspace] onBeforeRouteLeave triggered - navigating from', from.path, 'to', to.path)
+  console.log('[Workspace] current state - editablePlan:', !!editablePlan.value, 'convId:', convId.value)
+  
+  try {
+    await autoSaveAndLinkItinerary()
+  } catch (e) {
+    console.warn('[Workspace] save before route leave failed:', e)
+  }
+  next()
 })
 </script>
 
