@@ -184,7 +184,6 @@
               <div class="ws-day-header">
                 <span class="ws-day-num">{{ day.dayNumber }}</span>
                 <span class="ws-day-label">Day {{ day.dayNumber }}</span>
-                <button class="ws-add-item" @click="addItem(day.dayNumber)">+ 添加</button>
               </div>
 
               <TransitionGroup name="item-list" tag="div" class="ws-items">
@@ -192,18 +191,44 @@
                   v-for="(item, ii) in day.items"
                   :key="`${day.dayNumber}-${ii}`"
                   class="ws-item"
-                  :class="'type-' + getTypeClass(item.type)"
-                  draggable="true"
-                  @dragstart="onDragStart($event, day.dayNumber, ii)"
-                  @dragover.prevent
-                  @drop="onDrop($event, day.dayNumber, ii)"
+                  :class="['type-' + getTypeClass(item.type), { expanded: isItemExpanded(day.dayNumber, ii) }]"
                 >
-                  <span class="ws-item-icon">{{ typeIconMap[item.type] || '📍' }}</span>
-                  <span class="ws-item-name">{{ item.name || '未命名' }}</span>
-                  <div class="ws-item-actions">
-                    <button @click="editItem(day.dayNumber, ii)" class="ws-item-btn edit">编辑</button>
-                    <button @click="deleteItem(day.dayNumber, ii)" class="ws-item-btn delete">删除</button>
+                  <div class="ws-item-header" @click="toggleItemExpand(day.dayNumber, ii)">
+                    <span class="ws-item-icon">{{ typeIconMap[item.type] || '📍' }}</span>
+                    <span class="ws-item-name">{{ item.name || '未命名' }}</span>
+                    <span class="ws-item-expand-arrow">{{ isItemExpanded(day.dayNumber, ii) ? '▲' : '▼' }}</span>
+                    <div class="ws-item-actions">
+                      <button @click.stop="handleDeleteItem(day.dayNumber, ii, item.name)" class="ws-item-btn delete">删除</button>
+                    </div>
                   </div>
+
+                  <!-- 可展开详情 -->
+                  <transition name="item-expand">
+                    <div v-if="isItemExpanded(day.dayNumber, ii)" class="ws-item-detail">
+                      <div v-if="item.description && item.description !== '暂无描述'" class="ws-item-detail-row">
+                        <span class="ws-item-detail-icon">📝</span>
+                        <span class="ws-item-detail-text">{{ item.description }}</span>
+                      </div>
+                      <div v-if="item.location?.name" class="ws-item-detail-row">
+                        <span class="ws-item-detail-icon">📍</span>
+                        <span class="ws-item-detail-text">{{ item.location.name }}</span>
+                      </div>
+                      <div v-if="hasValidCoords(item.location)" class="ws-item-detail-row">
+                        <span class="ws-item-detail-icon">🌐</span>
+                        <span class="ws-item-detail-text">{{ item.location.lat }}, {{ item.location.lng }}</span>
+                      </div>
+                      <div v-if="hasValidCoords(item.location)" class="ws-item-map-row">
+                        <a
+                          class="ws-item-map-link"
+                          :href="`https://uri.amap.com/marker?position=${item.location.lng},${item.location.lat}`"
+                          target="_blank"
+                          rel="noopener"
+                        >
+                          🗺️ 在地图中查看
+                        </a>
+                      </div>
+                    </div>
+                  </transition>
                 </div>
               </TransitionGroup>
 
@@ -230,7 +255,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { generateItineraryStream, modifyItineraryStream } from '../../api/itinerary'
 import type { ItineraryRequest, ItineraryPlan, GenerationStats } from '../../api/itinerary'
 import { goBackByAppRule } from '../../composables/useBackHandler'
@@ -255,7 +280,7 @@ const {
 const {
   editablePlan, isSaving, convId, totalItems,
   normalizePlan, mergeRefinedPlan, saveFromWorkspace, loadDetailForEdit,
-  addItem, deleteItem,
+  deleteItem,
 } = useItinerary()
 
 const { onDragStart, onDrop, onDayDrop } = useDragDrop(editablePlan)
@@ -589,7 +614,7 @@ function extractActionFromLog(msg: string): string {
 }
 
 // ===== 本地 UI 辅助 =====
-const editingItemKey = ref('')
+const expandedItems = ref<Set<string>>(new Set())
 
 const typeIconMap: Record<string, string> = {
   '景点': '📍',
@@ -600,9 +625,23 @@ const typeIconMap: Record<string, string> = {
   '购物': '🛍️',
 }
 
-function editItem(dayNum: number, idx: number) {
+function isItemExpanded(dayNum: number, idx: number): boolean {
+  return expandedItems.value.has(`${dayNum}-${idx}`)
+}
+
+function toggleItemExpand(dayNum: number, idx: number) {
   const k = `${dayNum}-${idx}`
-  editingItemKey.value = editingItemKey.value === k ? '' : k
+  const s = new Set(expandedItems.value)
+  if (s.has(k)) {
+    s.delete(k)
+  } else {
+    s.add(k)
+  }
+  expandedItems.value = s
+}
+
+function hasValidCoords(loc: { lat: number; lng: number }): boolean {
+  return !!(loc && loc.lat !== 0 && loc.lng !== 0)
 }
 
 function getTypeClass(t: string): string {
@@ -615,6 +654,25 @@ function getTypeClass(t: string): string {
     '购物': 'shopping',
   }
   return map[t] || 'default'
+}
+
+// ===== 删除行程项（带二次确认） =====
+async function handleDeleteItem(dayNum: number, idx: number, itemName?: string) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除「${itemName || '未命名'}」吗？`,
+      '删除确认',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    deleteItem(dayNum, idx)
+    ElMessage.success('已删除')
+  } catch {
+    // 用户取消，不做任何操作
+  }
 }
 
 // ===== 保存（包装 composable 以添加 UI 反馈） =====
@@ -857,15 +915,93 @@ onMounted(async () => {
 
 .ws-bubble-text {
   white-space: pre-wrap;
+  line-height: 1.7;
 }
-.ws-bubble-text :deep(code) {
-  background: rgba(51, 133, 255, 0.06);
-  padding: 1px 5px;
+.ws-bubble-text :deep(.md-h1) {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1E3A5F;
+  margin: 12px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid rgba(51, 133, 255, 0.15);
+}
+.ws-bubble-text :deep(.md-h2) {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1E3A5F;
+  margin: 10px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(51, 133, 255, 0.1);
+}
+.ws-bubble-text :deep(.md-h3) {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1E3A5F;
+  margin: 8px 0 4px;
+}
+.ws-bubble-text :deep(.md-code-block) {
+  background: #F1F5F9;
+  border: 1px solid rgba(51, 133, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #334155;
+}
+.ws-bubble-text :deep(.md-code-block code) {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.ws-bubble-text :deep(.md-inline-code) {
+  background: rgba(51, 133, 255, 0.08);
+  padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
   color: #3385FF;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
 }
 .ws-bubble-text :deep(strong) { font-weight: 700; }
+.ws-bubble-text :deep(em) { font-style: italic; color: #64748B; }
+.ws-bubble-text :deep(.md-ul),
+.ws-bubble-text :deep(.md-ol) {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+.ws-bubble-text :deep(.md-li),
+.ws-bubble-text :deep(.md-oli) {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+.ws-bubble-text :deep(.md-li::marker) {
+  color: #3385FF;
+}
+.ws-bubble-text :deep(.md-oli::marker) {
+  color: #3385FF;
+  font-weight: 600;
+}
+.ws-bubble-text :deep(.md-hr) {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(51, 133, 255, 0.2), transparent);
+  margin: 12px 0;
+}
+.ws-bubble-text :deep(.md-link) {
+  color: #3385FF;
+  text-decoration: none;
+  font-weight: 500;
+  border-bottom: 1px solid rgba(51, 133, 255, 0.3);
+  transition: all 0.15s;
+}
+.ws-bubble-text :deep(.md-link:hover) {
+  color: #1A6FFF;
+  border-bottom-color: #1A6FFF;
+}
 
 .ws-time {
   font-size: 11px;
@@ -1160,22 +1296,34 @@ onMounted(async () => {
 }
 
 .ws-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
   border-radius: 9px;
   background: #FAFBFC;
   border: 1px solid rgba(51, 133, 255, 0.06);
-  cursor: grab;
   transition: all 0.15s;
+  overflow: hidden;
 }
 .ws-item:hover {
   border-color: rgba(51, 133, 255, 0.15);
   box-shadow: 0 1px 4px rgba(51, 133, 255, 0.06);
   background: #fff;
 }
-.ws-item:active { cursor: grabbing; }
+.ws-item.expanded {
+  border-color: rgba(51, 133, 255, 0.2);
+  box-shadow: 0 2px 8px rgba(51, 133, 255, 0.08);
+  background: #fff;
+}
+
+.ws-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.ws-item-header:hover {
+  background: rgba(51, 133, 255, 0.02);
+}
 
 .ws-item-icon { font-size: 16px; flex-shrink: 0; }
 .ws-item-name {
@@ -1188,15 +1336,17 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ws-item-expand-arrow {
+  font-size: 9px;
+  color: #94A3B8;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
 
 .ws-item-actions {
   display: flex;
   gap: 4px;
-  margin-left: auto;
-  opacity: 0;
-  transition: opacity 0.15s;
 }
-.ws-item:hover .ws-item-actions { opacity: 1; }
 
 .ws-item-btn {
   padding: 3px 8px;
@@ -1208,10 +1358,113 @@ onMounted(async () => {
   cursor: pointer;
   transition: all 0.1s;
 }
-.ws-item-btn.edit { color: #3385FF; }
-.ws-item-btn.edit:hover { background: rgba(51, 133, 255, 0.08); }
 .ws-item-btn.delete { color: #94A3B8; }
 .ws-item-btn.delete:hover { color: #EF4444; background: rgba(239, 68, 68, 0.06); }
+
+/* 行程项展开详情 */
+.ws-item-detail {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid rgba(51, 133, 255, 0.06);
+  background: rgba(248, 251, 255, 0.6);
+  cursor: default;
+}
+
+.ws-item-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ws-item-field.half { flex: 1; }
+
+.ws-item-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #7A8FA6;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.ws-item-input,
+.ws-item-select {
+  padding: 6px 10px;
+  border: 1px solid rgba(51, 133, 255, 0.12);
+  border-radius: 6px;
+  font-size: 13px;
+  color: #1E3A5F;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ws-item-input:focus,
+.ws-item-select:focus,
+.ws-item-textarea:focus {
+  border-color: #3385FF;
+  box-shadow: 0 0 0 3px rgba(51, 133, 255, 0.08);
+}
+.ws-item-input::placeholder,
+.ws-item-textarea::placeholder { color: #B8C9E0; }
+
+.ws-item-textarea {
+  padding: 6px 10px;
+  border: 1px solid rgba(51, 133, 255, 0.12);
+  border-radius: 6px;
+  font-size: 13px;
+  color: #1E3A5F;
+  background: #fff;
+  outline: none;
+  resize: vertical;
+  min-height: 40px;
+  font-family: inherit;
+  line-height: 1.5;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ws-item-location-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ws-item-map-row {
+  margin-top: 2px;
+}
+
+.ws-item-map-btn {
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px dashed rgba(51, 133, 255, 0.2);
+  border-radius: 7px;
+  background: transparent;
+  color: #3385FF;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ws-item-map-btn:hover:not(.disabled) {
+  background: rgba(51, 133, 255, 0.04);
+  border-style: solid;
+}
+.ws-item-map-btn.disabled {
+  color: #B8C9E0;
+  cursor: not-allowed;
+}
+
+/* 展开/折叠动画 */
+.item-expand-enter-active,
+.item-expand-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.item-expand-enter-from,
+.item-expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
 
 .ws-empty-day {
   font-size: 12px;

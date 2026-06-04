@@ -79,14 +79,45 @@ export function useConversation() {
     }
   }
 
-  // 格式化内容（简单Markdown）
+  // 格式化内容（增强Markdown）
   function formatContent(content: unknown): string {
     const text = typeof content === 'string' ? content : JSON.stringify(content ?? '')
     if (!text) return ''
-    return text
+    
+    let html = text
+      // 代码块（```...```）
+      .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre class="md-code-block"><code>$2</code></pre>')
+      // 行内代码（`...`）
+      .replace(/`(.*?)`/g, '<code class="md-inline-code">$1</code>')
+      // 标题（###、##、#）
+      .replace(/^### (.*$)/gm, '<h4 class="md-h3">$1</h4>')
+      .replace(/^## (.*$)/gm, '<h3 class="md-h2">$1</h3>')
+      .replace(/^# (.*$)/gm, '<h2 class="md-h1">$1</h2>')
+      // 粗体（**...**）
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/`(.*?)`/g, '<code>$1</code>')
+      // 斜体（*...*）
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      // 无序列表
+      .replace(/^[\s]*[-*+] (.*$)/gm, '<li class="md-li">$1</li>')
+      // 有序列表
+      .replace(/^[\s]*\d+\. (.*$)/gm, '<li class="md-oli">$1</li>')
+      // 分隔线
+      .replace(/^[-*_]{3,}$/gm, '<hr class="md-hr">')
+      // 链接
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="md-link">$1</a>')
+      // 换行
       .replace(/\n/g, '<br>')
+    
+    // 处理列表：将连续的li包裹在ul/ol中
+    html = html
+      .replace(/(<li class="md-li">.*?<\/li>(?:<br>)?)+/g, (match) => {
+        return '<ul class="md-ul">' + match.replace(/<br>/g, '') + '</ul>'
+      })
+      .replace(/(<li class="md-oli">.*?<\/li>(?:<br>)?)+/g, (match) => {
+        return '<ol class="md-ol">' + match.replace(/<br>/g, '') + '</ol>'
+      })
+    
+    return html
   }
 
   // 格式化时间

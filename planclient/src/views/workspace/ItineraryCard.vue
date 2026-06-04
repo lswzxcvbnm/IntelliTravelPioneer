@@ -20,10 +20,41 @@
             <span class="ws-ir-day-count">{{ day.items.length }} 个地点</span>
           </div>
           <div class="ws-ir-items">
-            <div v-for="(item, index) in day.items" :key="index" class="ws-ir-item">
-              <span class="ws-ir-item-icon">{{ typeIconMap[item.type] || '📍' }}</span>
-              <span class="ws-ir-item-name">{{ item.name }}</span>
-              <span class="ws-ir-item-type">{{ item.type }}</span>
+            <div
+              v-for="(item, index) in day.items"
+              :key="index"
+              class="ws-ir-item"
+              :class="{ expanded: isItemExpanded(day.dayNumber, index) }"
+            >
+              <div class="ws-ir-item-header" @click.stop="toggleItemExpand(day.dayNumber, index)">
+                <span class="ws-ir-item-icon">{{ typeIconMap[item.type] || '📍' }}</span>
+                <span class="ws-ir-item-name">{{ item.name }}</span>
+                <span class="ws-ir-item-type">{{ item.type }}</span>
+                <span class="ws-ir-item-toggle">{{ isItemExpanded(day.dayNumber, index) ? '▲' : '▼' }}</span>
+              </div>
+              <transition name="ir-item-expand">
+                <div v-if="isItemExpanded(day.dayNumber, index)" class="ws-ir-item-detail">
+                  <div v-if="item.description && item.description !== '暂无描述'" class="ws-ir-detail-row">
+                    <span class="ws-ir-detail-icon">📝</span>
+                    <span class="ws-ir-detail-text">{{ item.description }}</span>
+                  </div>
+                  <div v-if="item.location?.name" class="ws-ir-detail-row">
+                    <span class="ws-ir-detail-icon">📍</span>
+                    <span class="ws-ir-detail-text">{{ item.location.name }}</span>
+                  </div>
+                  <div v-if="hasValidCoords(item.location)" class="ws-ir-detail-row">
+                    <a
+                      class="ws-ir-map-link"
+                      :href="`https://uri.amap.com/marker?position=${item.location?.lng},${item.location?.lat}`"
+                      target="_blank"
+                      rel="noopener"
+                      @click.stop
+                    >
+                      🗺️ 在地图中查看
+                    </a>
+                  </div>
+                </div>
+              </transition>
             </div>
           </div>
         </div>
@@ -40,7 +71,12 @@ import { ref, computed } from 'vue'
 
 interface ItineraryDay {
   dayNumber: number
-  items: Array<{ name: string; type: string }>
+  items: Array<{
+    name: string
+    type: string
+    description?: string
+    location?: { lat: number; lng: number; name?: string }
+  }>
 }
 
 interface ItineraryData {
@@ -60,6 +96,7 @@ const emit = defineEmits<{
 }>()
 
 const isExpanded = ref(false)
+const expandedItems = ref<Set<string>>(new Set())
 
 const typeIconMap: Record<string, string> = {
   '景点': '🏛',
@@ -79,7 +116,12 @@ const itineraryData = computed<ItineraryData | null>(() => {
       totalItems: plan.dailyPlans?.reduce((s: number, d: any) => s + (d.items?.length || 0), 0) || 0,
       dailyPlans: (plan.dailyPlans || []).map((d: any) => ({
         dayNumber: d.dayNumber,
-        items: (d.items || []).map((i: any) => ({ name: i.name || '-', type: i.type || '-' })),
+        items: (d.items || []).map((i: any) => ({
+          name: i.name || '-',
+          type: i.type || '-',
+          description: i.description,
+          location: i.location,
+        })),
       })),
     }
   } catch {
@@ -89,6 +131,25 @@ const itineraryData = computed<ItineraryData | null>(() => {
 
 function toggleExpand() {
   isExpanded.value = !isExpanded.value
+}
+
+function isItemExpanded(dayNum: number, idx: number): boolean {
+  return expandedItems.value.has(`${dayNum}-${idx}`)
+}
+
+function toggleItemExpand(dayNum: number, idx: number) {
+  const k = `${dayNum}-${idx}`
+  const s = new Set(expandedItems.value)
+  if (s.has(k)) {
+    s.delete(k)
+  } else {
+    s.add(k)
+  }
+  expandedItems.value = s
+}
+
+function hasValidCoords(loc?: { lat: number; lng: number }): boolean {
+  return !!(loc && loc.lat !== 0 && loc.lng !== 0)
 }
 </script>
 
@@ -147,12 +208,70 @@ function toggleExpand() {
 .ws-ir-items { padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
 
 .ws-ir-item {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: #5B7FA5; line-height: 1.5;
+  border-radius: 8px;
+  border: 1px solid rgba(51, 133, 255, 0.04);
+  overflow: hidden;
+  transition: all 0.15s;
 }
+.ws-ir-item.expanded {
+  border-color: rgba(51, 133, 255, 0.12);
+  background: #FAFBFC;
+}
+
+.ws-ir-item-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px;
+  font-size: 12px; color: #5B7FA5; line-height: 1.5;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.ws-ir-item-header:hover {
+  background: rgba(51, 133, 255, 0.02);
+}
+
 .ws-ir-item-icon { font-size: 14px; flex-shrink: 0; }
 .ws-ir-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: #1E3A5F; }
 .ws-ir-item-type { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: #F1F5F9; color: #7A8FA6; flex-shrink: 0; }
+.ws-ir-item-toggle { font-size: 8px; color: #94A3B8; flex-shrink: 0; }
+
+.ws-ir-item-detail {
+  padding: 4px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid rgba(51, 133, 255, 0.04);
+}
+
+.ws-ir-detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.ws-ir-detail-icon { flex-shrink: 0; font-size: 12px; }
+.ws-ir-detail-text { color: #5B7FA5; word-break: break-word; }
+
+.ws-ir-map-link {
+  font-size: 11px;
+  color: #3385FF;
+  text-decoration: none;
+  font-weight: 500;
+}
+.ws-ir-map-link:hover { text-decoration: underline; }
+
+.ir-item-expand-enter-active,
+.ir-item-expand-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.ir-item-expand-enter-from,
+.ir-item-expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
 
 .ws-ir-open-canvas {
   margin: 8px 14px 12px;
