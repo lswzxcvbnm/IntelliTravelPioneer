@@ -49,6 +49,10 @@
         </div>
         <p class="skill-desc">{{ skill.description || '暂无描述' }}</p>
         <p class="skill-prompt-preview">{{ truncateText(skill.prompt, 120) }}</p>
+        <div class="skill-resources" v-if="getRefCount(skill) > 0 || getScriptCount(skill) > 0">
+          <span class="tag" v-if="getRefCount(skill) > 0">{{ getRefCount(skill) }} 份参考</span>
+          <span class="tag" v-if="getScriptCount(skill) > 0">{{ getScriptCount(skill) }} 个脚本</span>
+        </div>
         <div class="skill-card-footer">
           <span class="skill-time">{{ formatTime(skill.createTime) }}</span>
           <div class="skill-actions" v-if="activeTab === 'mine'">
@@ -86,6 +90,40 @@
             <span>公开到技能市场（其他用户也可以使用此技能）</span>
           </label>
         </div>
+
+        <!-- References section -->
+        <div class="form-section">
+          <div class="section-header" @click="showRefs = !showRefs">
+            <span>📚 参考资料</span>
+            <span class="section-toggle">{{ showRefs ? '收起' : '展开' }}</span>
+          </div>
+          <div v-if="showRefs" class="section-body">
+            <p class="section-tip">添加Markdown格式的参考文档，Agent规划行程时可按需加载参考内容。</p>
+            <div v-for="(ref, i) in form.references" :key="'ref-'+i" class="kv-row">
+              <el-input v-model="ref.key" placeholder="文件名，如 北京美食指南.md" size="small" class="kv-key" />
+              <el-input v-model="ref.value" type="textarea" placeholder="文档内容..." size="small" class="kv-val" rows="3" />
+              <button class="btn-remove-kv" @click="removeRef(i)" title="删除">✕</button>
+            </div>
+            <button class="btn-add-kv" @click="addRef">+ 添加参考资料</button>
+          </div>
+        </div>
+
+        <!-- Scripts section -->
+        <div class="form-section">
+          <div class="section-header" @click="showScripts = !showScripts">
+            <span>⚙️ 可执行脚本</span>
+            <span class="section-toggle">{{ showScripts ? '收起' : '展开' }}</span>
+          </div>
+          <div v-if="showScripts" class="section-body">
+            <p class="section-tip">添加脚本代码，Agent执行时可引用（如数据清洗脚本、格式转换脚本等）。</p>
+            <div v-for="(script, i) in form.scripts" :key="'script-'+i" class="kv-row">
+              <el-input v-model="script.key" placeholder="脚本名，如 parse_gpx.py" size="small" class="kv-key" />
+              <el-input v-model="script.value" type="textarea" placeholder="脚本代码..." size="small" class="kv-val" rows="4" />
+              <button class="btn-remove-kv" @click="removeScript(i)" title="删除">✕</button>
+            </div>
+            <button class="btn-add-kv" @click="addScript">+ 添加脚本</button>
+          </div>
+        </div>
       </div>
       <template #footer>
         <button class="btn-cancel" @click="dialogVisible = false">取消</button>
@@ -111,11 +149,27 @@ const publicSkills = ref<SkillVO[]>([])
 const dialogVisible = ref(false)
 const editingSkill = ref<SkillVO | null>(null)
 const submitting = ref(false)
-const form = ref<SkillSaveRequest>({
+const showRefs = ref(false)
+const showScripts = ref(false)
+
+interface KVItem { key: string; value: string }
+
+interface SkillForm {
+  name: string
+  description: string
+  prompt: string
+  isPublic: boolean
+  references: KVItem[]
+  scripts: KVItem[]
+}
+
+const form = ref<SkillForm>({
   name: '',
   description: '',
   prompt: '',
-  isPublic: false
+  isPublic: false,
+  references: [],
+  scripts: []
 })
 
 const currentList = computed(() => activeTab.value === 'mine' ? mySkills.value : publicSkills.value)
@@ -136,7 +190,9 @@ async function loadSkills() {
 
 function showCreateDialog() {
   editingSkill.value = null
-  form.value = { name: '', description: '', prompt: '', isPublic: false }
+  form.value = { name: '', description: '', prompt: '', isPublic: false, references: [], scripts: [] }
+  showRefs.value = false
+  showScripts.value = false
   dialogVisible.value = true
 }
 
@@ -146,8 +202,12 @@ function showEditDialog(skill: SkillVO) {
     name: skill.name,
     description: skill.description || '',
     prompt: skill.prompt,
-    isPublic: skill.isPublic
+    isPublic: skill.isPublic,
+    references: mapToKV(skill.references),
+    scripts: mapToKV(skill.scripts)
   }
+  showRefs.value = getRefCount(skill) > 0
+  showScripts.value = getScriptCount(skill) > 0
   dialogVisible.value = true
 }
 
@@ -155,11 +215,19 @@ async function submitSkill() {
   if (!form.value.name || !form.value.prompt) return
   submitting.value = true
   try {
+    const payload: SkillSaveRequest = {
+      name: form.value.name,
+      description: form.value.description,
+      prompt: form.value.prompt,
+      isPublic: form.value.isPublic,
+      references: kvToMap(form.value.references),
+      scripts: kvToMap(form.value.scripts)
+    }
     if (editingSkill.value) {
-      await updateSkill(editingSkill.value.id, form.value)
+      await updateSkill(editingSkill.value.id, payload)
       ElMessage.success('技能已更新')
     } else {
-      await createSkill(form.value)
+      await createSkill(payload)
       ElMessage.success('技能已创建')
     }
     dialogVisible.value = false
@@ -193,6 +261,47 @@ function formatTime(time: string): string {
   if (!time) return ''
   const d = new Date(time)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function getRefCount(skill: SkillVO): number {
+  return skill.references ? Object.keys(skill.references).length : 0
+}
+
+function getScriptCount(skill: SkillVO): number {
+  return skill.scripts ? Object.keys(skill.scripts).length : 0
+}
+
+function mapToKV(map: Record<string, string> | null | undefined): KVItem[] {
+  if (!map) return []
+  return Object.entries(map).map(([k, v]) => ({ key: k, value: v }))
+}
+
+function kvToMap(kv: KVItem[]): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const item of kv) {
+    if (item.key.trim()) {
+      map[item.key.trim()] = item.value
+    }
+  }
+  return map
+}
+
+function addRef() {
+  form.value.references.push({ key: '', value: '' })
+  showRefs.value = true
+}
+
+function removeRef(i: number) {
+  form.value.references.splice(i, 1)
+}
+
+function addScript() {
+  form.value.scripts.push({ key: '', value: '' })
+  showScripts.value = true
+}
+
+function removeScript(i: number) {
+  form.value.scripts.splice(i, 1)
 }
 
 onMounted(() => { loadSkills() })
@@ -294,4 +403,40 @@ onMounted(() => { loadSkills() })
 .list-leave-active { transition: all .2s ease; }
 .list-enter-from { opacity: 0; transform: translateY(10px); }
 .list-leave-to { opacity: 0; }
+
+/* Resources tags */
+.skill-resources { display: flex; gap: 6px; margin-bottom: 10px; }
+.tag {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  background: #ecf5ff; color: #3385FF;
+}
+
+/* References & Scripts sections */
+.form-section {
+  border: 1px solid #ebeef5; border-radius: 8px; overflow: hidden;
+}
+.section-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; background: #f8f9fa; cursor: pointer;
+  font-size: 14px; font-weight: 600; color: #303133;
+  transition: background .2s;
+}
+.section-header:hover { background: #f0f2f5; }
+.section-toggle { font-size: 12px; color: #909399; font-weight: 400; }
+.section-body { padding: 12px 14px; }
+.section-tip { font-size: 12px; color: #909399; margin: 0 0 10px; }
+.kv-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
+.kv-key { width: 160px; min-width: 140px; }
+.kv-val { flex: 1; }
+.btn-remove-kv {
+  border: none; background: none; color: #f56c6c; font-size: 16px;
+  cursor: pointer; padding: 4px 6px; line-height: 1;
+}
+.btn-remove-kv:hover { opacity: .7; }
+.btn-add-kv {
+  border: 1px dashed #c0c4cc; border-radius: 6px; background: none;
+  padding: 6px 14px; font-size: 13px; color: #909399; cursor: pointer;
+  width: 100%; text-align: center; transition: all .2s;
+}
+.btn-add-kv:hover { border-color: #8AC4FF; color: #3385FF; }
 </style>
