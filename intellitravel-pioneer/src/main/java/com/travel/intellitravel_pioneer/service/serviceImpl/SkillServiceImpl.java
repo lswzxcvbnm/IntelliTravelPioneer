@@ -12,7 +12,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,8 +33,6 @@ public class SkillServiceImpl implements SkillService {
                 .name(request.getName())
                 .description(request.getDescription())
                 .prompt(request.getPrompt())
-                .references(request.getReferences())
-                .scripts(request.getScripts())
                 .isPublic(request.getIsPublic() != null ? request.getIsPublic() : false)
                 .build();
         po = skillRepository.save(po);
@@ -57,12 +54,6 @@ public class SkillServiceImpl implements SkillService {
         }
         if (request.getPrompt() != null && !request.getPrompt().isBlank()) {
             po.setPrompt(request.getPrompt());
-        }
-        if (request.getReferences() != null) {
-            po.setReferences(request.getReferences());
-        }
-        if (request.getScripts() != null) {
-            po.setScripts(request.getScripts());
         }
         if (request.getIsPublic() != null) {
             po.setIsPublic(request.getIsPublic());
@@ -120,24 +111,6 @@ public class SkillServiceImpl implements SkillService {
                 sb.append("描述：").append(skill.getDescription()).append("\n");
             }
             sb.append("要求：").append(skill.getPrompt()).append("\n\n");
-
-            // References: bundled knowledge documents (Anthropic-style progressive disclosure)
-            if (skill.getReferences() != null && !skill.getReferences().isEmpty()) {
-                sb.append("**参考资料：**\n");
-                for (Map.Entry<String, String> ref : skill.getReferences().entrySet()) {
-                    sb.append("#### ").append(ref.getKey()).append("\n");
-                    sb.append(ref.getValue()).append("\n\n");
-                }
-            }
-
-            // Scripts: bundled executable scripts (may be referenced by Agent)
-            if (skill.getScripts() != null && !skill.getScripts().isEmpty()) {
-                sb.append("**可执行脚本：**\n");
-                for (Map.Entry<String, String> script : skill.getScripts().entrySet()) {
-                    sb.append("脚本 `").append(script.getKey()).append("`：\n```\n");
-                    sb.append(script.getValue()).append("\n```\n\n");
-                }
-            }
         }
         return sb.toString();
     }
@@ -149,8 +122,6 @@ public class SkillServiceImpl implements SkillService {
                 .name(po.getName())
                 .description(po.getDescription())
                 .prompt(po.getPrompt())
-                .references(po.getReferences())
-                .scripts(po.getScripts())
                 .isPublic(po.getIsPublic())
                 .createTime(po.getCreateTime())
                 .updateTime(po.getUpdateTime())

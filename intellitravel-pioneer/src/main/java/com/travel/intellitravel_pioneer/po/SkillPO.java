@@ -1,20 +1,17 @@
 package com.travel.intellitravel_pioneer.po;
 
 import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
-import com.travel.intellitravel_pioneer.po.converter.StringMapJsonConverter;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 import java.util.UUID;
 
 @Entity
@@ -40,14 +37,6 @@ public class SkillPO {
 
     @Column(name = "prompt", columnDefinition = "TEXT", nullable = false)
     private String prompt;
-
-    @Convert(converter = StringMapJsonConverter.class)
-    @Column(name = "references_data", columnDefinition = "TEXT")
-    private Map<String, String> references;
-
-    @Convert(converter = StringMapJsonConverter.class)
-    @Column(name = "scripts", columnDefinition = "TEXT")
-    private Map<String, String> scripts;
 
     @Column(name = "is_public", nullable = false)
     private Boolean isPublic;

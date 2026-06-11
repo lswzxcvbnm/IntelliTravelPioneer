@@ -6,7 +6,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
 @Data
 @NoArgsConstructor
@@ -18,8 +17,6 @@ public class SkillVO {
     private String name;
     private String description;
     private String prompt;
-    private Map<String, String> references;
-    private Map<String, String> scripts;
     private Boolean isPublic;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

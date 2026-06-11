@@ -72,7 +72,7 @@ public class ItineraryServiceImpl implements ItineraryService {
 
         try {
             GenerationResult result = tripPlanningAiClient.modifyItineraryWithStats(
-                    token, request, currentPlan, userPrompt, wrappedNotifier);
+                    token, request, currentPlan, userPrompt, wrappedNotifier,conversationId);
             finalizeConversation(ctx, token, result.getPlan(), true);
             result.setConversationId(ctx.conversationId);
             return result;
@@ -229,9 +229,9 @@ public class ItineraryServiceImpl implements ItineraryService {
             sb.append("\n\n");
             var dailyPlans = plan.getDailyPlans();
             if (dailyPlans != null && !dailyPlans.isEmpty()) {
-                sb.append("📋 行程概览（").append(dailyPlans.size()).append("天）：\n");
+                sb.append(" 行程概览（").append(dailyPlans.size()).append("天）：\n");
                 for (var day : dailyPlans) {
-                    sb.append("  📅 Day ").append(day.getDayNumber()).append("：");
+                    sb.append("   Day ").append(day.getDayNumber()).append("：");
                     if (day.getItems() != null && !day.getItems().isEmpty()) {
                         String names = day.getItems().stream()
                                 .map(i -> i.getName())
@@ -244,7 +244,7 @@ public class ItineraryServiceImpl implements ItineraryService {
                 }
             }
             if (plan.getEstimatedCost() != null && plan.getEstimatedCost() > 0) {
-                sb.append("\n💰 预估费用：¥").append(plan.getEstimatedCost()).append("/人");
+                sb.append("\n 预估费用：¥").append(plan.getEstimatedCost()).append("/人");
             }
         }
 
@@ -257,7 +257,7 @@ public class ItineraryServiceImpl implements ItineraryService {
             conversationService.addMessage(token, ctx.conversationId,
                     AgentMessageCreateRequest.builder()
                             .role("system")
-                            .content("❌ 规划过程出现错误：" + errorMsg)
+                            .content(" 规划过程出现错误：" + errorMsg)
                             .build());
         } catch (Exception ignored) {
         }

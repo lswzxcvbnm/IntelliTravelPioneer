@@ -202,4 +202,113 @@ public class HttpTripSummaryAiClient implements TripSummaryAiClient {
         }
         return trimmed;
     }
+
+
+
+    //任务二
+    @Override
+    public String summarizeText(String text) {
+        if (text == null || text.isBlank()) {
+            return "无对话内容";
+        }
+
+        // 限制输入长度，避免 Token 超限
+        String truncated = text.length() > 3000 ? text.substring(0, 3000) + "..." : text;
+
+        String systemPrompt = "你是对话摘要助手。从以下对话中提取关键信息，只输出纯文本，不要JSON格式。\n" +
+                "需要提取的信息：\n" +
+                "- 目的地\n- 天数\n- 预算等级（经济/舒适/豪华）\n" +
+                "- 用户偏好（历史/美食/自然等）\n" +
+                "- 已确认的行程安排\n\n" +
+                "没有的信息就跳过。输出控制在200字以内。";
+
+        try {
+            String response = callLlmDirectly(systemPrompt, truncated);
+            return extractContentFromResponse(response);
+        } catch (Exception e) {
+            System.err.println("LLM summary failed: " + e.getMessage());
+            return fallbackExtract(truncated);
+        }
+    }
+
+    private String callLlmDirectly(String systemPrompt, String userText) {
+        if (llmApiKey == null || llmApiKey.isBlank()) {
+            throw new IntellitravelException("LLM API key is not configured");
+        }
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", llmModel);
+        body.put("temperature", 0.3);
+        body.put("max_tokens", 500);
+        body.put("messages", List.of(
+                Map.of("role", "system", "content", systemPrompt),
+                Map.of("role", "user", "content", userText)
+        ));
+
+        String requestUrl = llmBaseUrl + llmChatPath;
+
+        String response = RestClient.create()
+                .post()
+                .uri(requestUrl)
+                .contentType(MediaType.APPLICATION_JSON)
+                .headers(headers -> headers.setBearerAuth(llmApiKey))
+                .body(body)
+                .retrieve()
+                .body(String.class);
+
+        return response;
+    }
+
+    private String extractContent(String response) {
+        try {
+            JsonNode root = objectMapper.readTree(response);
+            String content = root.path("choices").path(0).path("message").path("content").asText();
+            return content != null && !content.isBlank() ? content.trim() : "无摘要内容";
+        } catch (Exception e) {
+            return "无摘要内容";
+        }
+    }
+
+    private String fallbackExtract(String text) {
+        StringBuilder summary = new StringBuilder();
+
+        // 提取目的地
+        java.util.regex.Pattern destPattern = java.util.regex.Pattern.compile("目的地[：:]\\s*([\\u4e00-\\u9fa5]+)|去([\\u4e00-\\u9fa5]{2,5})");
+        java.util.regex.Matcher destMatcher = destPattern.matcher(text);
+        if (destMatcher.find()) {
+            String dest = destMatcher.group(1) != null ? destMatcher.group(1) : destMatcher.group(2);
+            summary.append("目的地：").append(dest).append("。");
+        }
+
+        // 提取天数
+        java.util.regex.Pattern dayPattern = java.util.regex.Pattern.compile("(\\d+)[天日]");
+        java.util.regex.Matcher dayMatcher = dayPattern.matcher(text);
+        if (dayMatcher.find()) {
+            summary.append("天数：").append(dayMatcher.group(1)).append("天。");
+        }
+
+        // 提取预算
+        if (text.contains("经济")) summary.append("预算：经济型。");
+        else if (text.contains("舒适")) summary.append("预算：舒适型。");
+        else if (text.contains("豪华")) summary.append("预算：豪华型。");
+
+        // 提取兴趣
+        if (text.contains("历史") || text.contains("文化")) summary.append("偏好：历史文化。");
+        else if (text.contains("美食")) summary.append("偏好：美食。");
+        else if (text.contains("自然") || text.contains("徒步")) summary.append("偏好：自然风光。");
+
+        if (summary.length() == 0) {
+            return "用户正在规划旅行。";
+        }
+        return summary.toString();
+    }
+    private String extractContentFromResponse(String response) {
+        try {
+            JsonNode root = objectMapper.readTree(response);
+            String content = root.path("choices").path(0).path("message").path("content").asText();
+            return content != null && !content.isBlank() ? content.trim() : "无摘要内容";
+        } catch (Exception e) {
+            return "无摘要内容";
+        }
+    }
 }
