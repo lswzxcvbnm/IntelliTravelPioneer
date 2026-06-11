@@ -17,4 +17,6 @@ public class ItineraryRequest {
     private String budgetLevel;
     private String additionalNotes;
     private List<String> skillIds;
+    private String conversationId;
+    private String userPrompt;
 }

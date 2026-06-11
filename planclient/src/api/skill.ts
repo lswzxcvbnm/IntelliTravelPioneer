@@ -9,6 +9,8 @@ export interface SkillVO {
     name: string
     description: string
     prompt: string
+    references: Record<string, string>
+    scripts: Record<string, string>
     isPublic: boolean
     createTime: string
     updateTime: string
@@ -18,6 +20,8 @@ export interface SkillSaveRequest {
     name: string
     description: string
     prompt: string
+    references: Record<string, string>
+    scripts: Record<string, string>
     isPublic: boolean
 }
 

@@ -1,5 +1,6 @@
 package com.travel.intellitravel_pioneer.service.ai;
-
+import java.util.Optional;
+import com.travel.intellitravel_pioneer.vo.conversation.AgentMessageVO;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,7 +19,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-
+import com.travel.intellitravel_pioneer.service.IntentStateMachine;
+import com.travel.intellitravel_pioneer.service.ActionTracker;
+import com.travel.intellitravel_pioneer.service.IntentStateMachine.Intent;
+import com.travel.intellitravel_pioneer.service.IntentStateMachine.State;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -32,6 +36,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.travel.intellitravel_pioneer.service.ConversationContextManager;
+import com.travel.intellitravel_pioneer.service.MemoryManager;
+import com.travel.intellitravel_pioneer.service.EntityTracker;
 
 @Component
 public class HttpTripPlanningAiClient implements TripPlanningAiClient {
@@ -39,6 +48,21 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private final ObjectMapper objectMapper;
     private final ToolManagementService toolManagementService;
     private final TokenUtil tokenUtil;
+    private static final Logger log = LoggerFactory.getLogger(HttpTripPlanningAiClient.class);
+    @Autowired
+    private ConversationContextManager contextManager;
+
+    @Autowired
+    private MemoryManager memoryManager;
+
+    @Autowired
+    private EntityTracker entityTracker;
+
+    @Autowired
+    private IntentStateMachine intentStateMachine;
+
+    @Autowired
+    private ActionTracker actionTracker;
 
     @Value("${trip.ai.provider}")
     private String aiProvider;
@@ -102,24 +126,146 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
     @Override
     public ItineraryPlan modifyItinerary(String token, ItineraryRequest request,
-            ItineraryPlan currentPlan, String userPrompt) {
-        GenerationResult result = modifyItineraryWithStats(token, request, currentPlan, userPrompt, null);
+            ItineraryPlan currentPlan, String userPrompt, String conversationId) {
+        GenerationResult result = modifyItineraryWithStats(token, request, currentPlan, userPrompt, null,conversationId);
         return result != null ? result.getPlan() : null;
     }
 
     @Override
     public GenerationResult modifyItineraryWithStats(String token, ItineraryRequest request,
             ItineraryPlan currentPlan, String userPrompt,
-            java.util.function.Consumer<String> toolNotifier) {
+            java.util.function.Consumer<String> toolNotifier,String conversationId) {
         if (!isLlmProvider()) {
             throw new IntellitravelException("非 LLM 模式下暂不支持行程修改");
         }
-        return callLlmForRefine(token, request, toJsonString(currentPlan), userPrompt, toolNotifier);
+        return callLlmForRefine(token, request, toJsonString(currentPlan), userPrompt, toolNotifier,conversationId);
     }
 
     private GenerationResult callLlmForRefine(String token, ItineraryRequest request, String currentPlanJson,
-            String userPrompt, java.util.function.Consumer<String> toolNotifier) {
+            String userPrompt, java.util.function.Consumer<String> toolNotifier,String conversationId) {
+        System.out.println(">>> callLlmForRefine 被调用了！<<<");
+
+        System.out.println(">>> conversationId: " + conversationId);
+        System.out.println(">>> userPrompt: " + userPrompt);
+        EntityTracker.ExtractedEntities entities = null;
+        MemoryManager.WorkingMemory workingMemory = null;
+        String contradictionWarning = null;
         GenerationStats stats = new GenerationStats();
+
+        String userId = null;
+        try {
+            if (token != null && !token.isBlank()) {
+                var user = tokenUtil.getUser(token);
+                if (user != null) {
+                    userId = String.valueOf(user.getId());
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to extract user ID: " + e.getMessage());
+        }
+
+        // 意图检测和状态更新
+        if (conversationId != null && !conversationId.isBlank() && userPrompt != null) {
+            Intent intent = intentStateMachine.detectIntent(userPrompt);
+            intentStateMachine.updateIntent(conversationId, intent);
+
+            //  显示操作历史
+            if (intent == Intent.PLAN_SHOW_HISTORY) {
+                String historySummary = actionTracker.getActionHistorySummary(conversationId);
+                userPrompt = "用户要求查看操作历史记录。请回复以下历史记录，并询问用户想重复哪个操作：\n" + historySummary;
+                // 直接返回，不调用LLM修改
+                sendPhaseNotification(toolNotifier, "REFINE_END", historySummary);
+                return new GenerationResult(null, stats); // 返回原行程不变
+            }
+
+            //  按序号重复
+            else if (intent == Intent.PLAN_REPEAT_BY_NUMBER) {
+                Pattern pattern = Pattern.compile("重复第(\\d+)(?:个|次|条)?");
+                Matcher matcher = pattern.matcher(userPrompt);
+                if (matcher.find()) {
+                    int seqNumber = Integer.parseInt(matcher.group(1));
+                    Optional<ActionTracker.UserAction> targetAction = actionTracker.getActionBySequence(conversationId, seqNumber);
+                    if (targetAction.isPresent()) {
+                        ActionTracker.UserAction action = targetAction.get();
+                        System.out.println("[ActionTracker] Repeating action #" + seqNumber + ": " + action.getActionType());
+                        userPrompt = String.format("用户要求重复第%d个操作。目标操作是：【%s】（操作类型：%s）。请执行相同的操作。",
+                                seqNumber, action.getDescription(), action.getActionType());
+                    } else {
+                        userPrompt = "用户要求重复第" + seqNumber + "个操作，但该序号不存在。请告诉用户：当前共有" +
+                                actionTracker.getActionHistory(conversationId).size() + "条操作历史记录。";
+                    }
+                }
+            }
+
+
+            // 重复上上一个
+            else if (intent == Intent.PLAN_REPEAT_PREVIOUS) {
+                Optional<ActionTracker.UserAction> previousAction = actionTracker.getActionByOffset(conversationId, 2);
+                if (previousAction.isPresent()) {
+                    ActionTracker.UserAction action = previousAction.get();
+                    userPrompt = String.format("用户要求重复上上一次操作。目标操作是：【%s】。请执行相同的操作。", action.getDescription());
+                } else {
+                    userPrompt = "用户要求重复上上一次操作，但还没有足够的历史操作记录。";
+                }
+            }
+
+            // 重复上一次
+            else if (intent == Intent.PLAN_REPEAT_LAST) {
+                Optional<ActionTracker.UserAction> lastAction = actionTracker.getLastAction(conversationId);
+                if (lastAction.isPresent()) {
+                    ActionTracker.UserAction action = lastAction.get();
+                    userPrompt = String.format("用户要求重复上一次操作。上一次操作是：【%s】。请执行相同的操作。", action.getDescription());
+                } else {
+                    userPrompt = "用户要求重复上一次操作，但还没有执行过任何修改操作。";
+                }
+            }
+            if (intent == Intent.PLAN_MODIFY) {
+                intentStateMachine.updateState(conversationId, State.MODIFYING);
+            } else if (intent == Intent.PLAN_QUERY) {
+                intentStateMachine.updateState(conversationId, State.GATHERING_INFO);
+            } else if (intent == Intent.PLAN_REPEAT_LAST) {
+                intentStateMachine.updateState(conversationId, State.MODIFYING);
+
+                Optional<ActionTracker.UserAction> lastAction = actionTracker.getLastAction(conversationId);
+                if (lastAction.isPresent()) {
+                    ActionTracker.UserAction action = lastAction.get();
+                    System.out.println("[ActionTracker] Repeating last action: " + action.getActionType());
+                    userPrompt = String.format("用户要求重复上一次操作。上一次操作是：【%s】。请执行相同的操作。", action.getDescription());
+                } else {
+                    userPrompt = "用户要求重复上一次操作，但还没有执行过任何修改操作。请告诉用户：还没有执行过修改操作。";
+                }
+            } else {
+                intentStateMachine.updateState(conversationId, State.PLANNING);
+            }
+        }
+
+        // 实体追踪
+        if (conversationId != null && !conversationId.isBlank() && userPrompt != null) {
+            entities = entityTracker.loadEntities(conversationId);
+            if (entities == null) {
+                entities = new EntityTracker.ExtractedEntities();
+            }
+            entities = entityTracker.extractEntities(userPrompt, entities);
+            entityTracker.saveEntities(conversationId, entities);
+        }
+
+        // 工作记忆
+        if (conversationId != null && !conversationId.isBlank()) {
+            workingMemory = memoryManager.getWorkingMemory(conversationId);
+        }
+
+        // 矛盾检测
+        if (conversationId != null && !conversationId.isBlank() && userPrompt != null && entities != null) {
+            Optional<EntityTracker.Contradiction> contradiction =
+                    entityTracker.detectContradiction(userPrompt, entities, workingMemory);
+            if (contradiction.isPresent()) {
+                contradictionWarning = buildContradictionWarning(contradiction.get());
+                log.warn("【矛盾检测】修改阶段发现矛盾: {}", contradiction.get().getConflicts());
+            }
+        }
+
+
+        stats = new GenerationStats();
         String amapUrl = amapMcpUrl;
         try (AmapMcpClient mcpClient = new AmapMcpClient(amapUrl)) {
             mcpClient.initialize();
@@ -138,7 +284,38 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 refineUserMessage = refineUserMessage + skillContext;
             }
             messages.add(Map.of("role", "user", "content", refineUserMessage));
+            ConversationContextManager.OptimizedContext optimizedContext = null;
+            if (conversationId != null && !conversationId.isBlank()) {
+                try {
+                    optimizedContext = contextManager.getOptimizedContext(conversationId, userPrompt,token);
+                    log.info("【修改阶段-上下文】对话ID: {}, 原始消息数: {}, 优化后消息数: {}, 摘要: {}",
+                            conversationId,
+                            optimizedContext.getOriginalCount(),
+                            optimizedContext.getOptimizedCount(),
+                            optimizedContext.getSummary() != null ? optimizedContext.getSummary().substring(0, Math.min(100, optimizedContext.getSummary().length())) + "..." : "无");
+                    if (optimizedContext.getSummary() != null && !optimizedContext.getSummary().isBlank()) {
+                        messages.add(1, Map.of("role", "system", "content",
+                                "【对话历史摘要】以下是之前对话的关键信息摘要，请基于这些信息理解上下文：\n\n" + optimizedContext.getSummary()));
+                    }
+                } catch (Exception e) {
+                    log.warn("获取优化上下文失败: {}", e.getMessage());
+                }
+            }
 
+            if (conversationId != null && !conversationId.isBlank() && userPrompt != null) {
+                String tempActionType = detectActionType(userPrompt);
+                if ("UPDATE_DAYS".equals(tempActionType)) {
+                    int newDays = extractDaysFromPrompt(userPrompt);
+                    if (newDays > 0 && newDays != request.getDays()) {
+                        int oldDays = request.getDays();
+                        log.info("【天数修改】将天数从 {} 改为 {}（在行程生成前更新）", oldDays, newDays);
+                        request.setDays(newDays);
+                        if (toolNotifier != null) {
+                            toolNotifier.accept("THOUGHT:检测到天数修改请求，已将行程天数从 " + oldDays + " 天调整为 " + newDays + " 天");
+                        }
+                    }
+                }
+            }
             ItineraryPlan refinedPlan;
             int executeRetries = 0;
             int maxExecuteRetries = 2;
@@ -163,7 +340,15 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             sendPhaseNotification(toolNotifier, "REFINE_END",
                     "行程修改完成，共" + (refinedPlan.getDailyPlans() != null ? refinedPlan.getDailyPlans().size() : 0) + "天");
+            if (conversationId != null && !conversationId.isBlank() && userPrompt != null) {
+                String actionType = detectActionType(userPrompt);
 
+                Map<String, Object> params = new HashMap<>();
+                params.put("plan", refinedPlan);
+                params.put("userPrompt", userPrompt);
+                actionTracker.recordAction(conversationId, actionType, userPrompt, params);
+                log.info("【操作记忆】修改阶段记录操作: {} - {}", actionType, userPrompt);
+            }
             return new GenerationResult(refinedPlan, stats);
 
         } catch (IntellitravelException ie) {
@@ -568,6 +753,103 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
     private GenerationResult callLlmForItinerary(String token, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier) {
+        String conversationId = request.getConversationId();
+        EntityTracker.ExtractedEntities entities = null;
+        MemoryManager.WorkingMemory workingMemory = null;
+        ConversationContextManager.OptimizedContext optimizedContext = null;
+        String contradictionWarning = null;
+
+        String userId = null;
+        try {
+            if (token != null && !token.isBlank()) {
+                var user = tokenUtil.getUser(token);
+                if (user != null) {
+                    userId = String.valueOf(user.getId());
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to extract user ID: " + e.getMessage());
+        }
+
+        // ========== 🆕 意图检测和重复操作处理 ==========
+        if (conversationId != null && !conversationId.isBlank() && request.getUserPrompt() != null) {
+            Intent intent = intentStateMachine.detectIntent(request.getUserPrompt());
+            intentStateMachine.updateIntent(conversationId, intent);
+
+            // 更新状态
+            if (intent == Intent.PLAN_MODIFY) {
+                intentStateMachine.updateState(conversationId, State.MODIFYING);
+            } else if (intent == Intent.PLAN_QUERY) {
+                intentStateMachine.updateState(conversationId, State.GATHERING_INFO);
+            } else if (intent == Intent.PLAN_REPEAT_LAST) {
+                intentStateMachine.updateState(conversationId, State.MODIFYING);
+
+                // 处理重复上一次操作
+                Optional<ActionTracker.UserAction> lastAction = actionTracker.getLastAction(conversationId);
+                if (lastAction.isPresent()) {
+                    ActionTracker.UserAction action = lastAction.get();
+                    System.out.println("[ActionTracker] Repeating last action: " + action.getActionType() + " - " + action.getDescription());
+
+                    String repeatPrompt = String.format(
+                            "用户要求重复上一次操作。上一次操作是：【%s】（操作类型：%s）。请执行相同的操作。",
+                            action.getDescription(), action.getActionType()
+                    );
+                    request.setUserPrompt(repeatPrompt);
+                } else {
+                    request.setUserPrompt("用户要求重复上一次操作，但还没有执行过任何修改操作。请告诉用户：还没有执行过修改操作，请先进行一次修改。");
+                }
+            } else {
+                intentStateMachine.updateState(conversationId, State.PLANNING);
+            }
+
+
+            String statePrompt = "";
+            if (conversationId != null && !conversationId.isBlank()) {
+                statePrompt = intentStateMachine.buildStatePrompt(conversationId);
+            }
+        }
+
+
+        if (conversationId != null && !conversationId.isBlank()) {
+            // 检测意图并更新状态
+            Intent intent = intentStateMachine.detectIntent(request.getUserPrompt());
+            intentStateMachine.updateIntent(conversationId, intent);
+
+            if (intent == Intent.PLAN_MODIFY) {
+                intentStateMachine.updateState(conversationId, State.MODIFYING);
+            } else if (intent == Intent.PLAN_QUERY) {
+                intentStateMachine.updateState(conversationId, State.GATHERING_INFO);
+            } else {
+                intentStateMachine.updateState(conversationId, State.PLANNING);
+            }
+
+            String statePrompt = intentStateMachine.buildStatePrompt(conversationId);
+        }
+
+        if (conversationId != null && !conversationId.isBlank()) {
+            try {
+                optimizedContext = contextManager.getOptimizedContext(conversationId, null,token);
+                entities = entityTracker.loadEntities(conversationId);
+                if (entities == null) {
+                    entities = new EntityTracker.ExtractedEntities();
+                }
+                if (request.getUserPrompt() != null) {
+                    entities = entityTracker.extractEntities(request.getUserPrompt(), entities);
+                    entityTracker.saveEntities(conversationId, entities);
+                }
+                workingMemory = memoryManager.getWorkingMemory(conversationId);
+                Optional<EntityTracker.Contradiction> contradiction =
+                        entityTracker.detectContradiction(request.getUserPrompt(), entities, workingMemory);
+                if (contradiction.isPresent()) {
+                    contradictionWarning = buildContradictionWarning(contradiction.get());
+                }
+            } catch (Exception e) {
+                System.err.println("Failed to load conversation context: " + e.getMessage());
+            }
+        }
+
+
+
         GenerationStats stats = new GenerationStats();
         String amapUrl = amapMcpUrl;
         boolean mcpAvailable = false;
@@ -626,7 +908,8 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 }
             }
 
-            String userInput = buildUserInputJson(request);
+//            String userInput = buildUserInputJson(request);
+            String userInput = buildUserInputJson(request, contradictionWarning);
 
             // ========== Phase 1: PLAN ==========
             sendPhaseNotification(toolNotifier, "PLAN_START",
@@ -666,13 +949,47 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             AmapMcpClient agentMcpClient = mcpAvailable ? mcpClient : null;
 
             while (true) {
+//                List<Map<String, Object>> messages = new ArrayList<>();
+//                messages.add(Map.of("role", "system", "content",
+//                        EXECUTE_SYSTEM_PROMPT_PREFIX + "\n\n【已制定的执行规划，请严格遵循】\n" + planContent));
+//                messages.add(Map.of("role", "user", "content", userInput));
+
+//                String enhancedSystemPrompt = ...;
+//                if (conversationId != null) {
+//                    enhancedSystemPrompt = buildEnhancedSystemPrompt(...);
+//                }
+
+                String statePrompt = intentStateMachine.buildStatePrompt(conversationId);
+                String enhancedSystemPrompt = EXECUTE_SYSTEM_PROMPT_PREFIX + "\n\n【已制定的执行规划，请严格遵循】\n" + planContent;
+                if (conversationId != null && !conversationId.isBlank()) {
+                    enhancedSystemPrompt = buildEnhancedSystemPrompt(optimizedContext, entities, workingMemory, token)
+                            + "\n\n【已制定的执行规划，请严格遵循】\n" + planContent;
+                    if (statePrompt != null && !statePrompt.isBlank()) {
+                        enhancedSystemPrompt = statePrompt + "\n" + enhancedSystemPrompt;
+                    }
+                }
+
                 List<Map<String, Object>> messages = new ArrayList<>();
-                messages.add(Map.of("role", "system", "content",
-                        EXECUTE_SYSTEM_PROMPT_PREFIX + "\n\n【已制定的执行规划，请严格遵循】\n" + planContent));
+                messages.add(Map.of("role", "system", "content", enhancedSystemPrompt));
+                if (conversationId != null && optimizedContext != null) {
+                    for (AgentMessageVO msg : optimizedContext.getMessages()) {
+                        messages.add(Map.of("role", msg.getRole(), "content", msg.getContent()));
+                    }
+                }
                 messages.add(Map.of("role", "user", "content", userInput));
+
 
                 try {
                     draftPlan = runAgentLoop(token, messages, tools, agentMcpClient, request, toolNotifier, stats);
+
+                    if (conversationId != null && !conversationId.isBlank() && request.getUserPrompt() != null) {
+                        String actionType = detectActionType(request.getUserPrompt());
+                        Map<String, Object> params = new HashMap<>();
+                        params.put("plan", draftPlan);
+                        params.put("userPrompt", request.getUserPrompt());
+                        actionTracker.recordAction(conversationId, actionType, request.getUserPrompt(), params);
+                        System.out.println("[ActionTracker] Recorded action: " + actionType + " for conversation " + conversationId);
+                    }
                     break;
                 } catch (IntellitravelException ie) {
                     throw ie;
@@ -710,6 +1027,23 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 verifySummary += "（行程已自动修正，现共" + correctedDays + "天）";
             }
 
+            if (draftPlan != null && conversationId != null && !conversationId.isBlank()) {
+                final ItineraryPlan finalPlan = draftPlan;
+                memoryManager.updateWorkingMemory(conversationId, wm -> {
+                    wm.setDraftPlan(finalPlan);
+                    wm.setCurrentIntent("planning");
+                });
+            }
+
+
+            // 在 callLlmForItinerary 方法中，行程生成成功后
+            if (userId != null && request != null && draftPlan != null) {
+                try {
+                    memoryManager.extractAndSavePreferences(userId, request, draftPlan);
+                } catch (Exception e) {
+                    throw new IntellitravelException("Failed to save user preferences: " + e.getMessage());
+                }
+            }
             sendPhaseNotification(toolNotifier, "VERIFY_END", verifySummary);
 
             return new GenerationResult(draftPlan, stats);
@@ -746,10 +1080,38 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         }
     }
 
-    private String buildUserInputJson(ItineraryRequest request) {
+//    private String buildUserInputJson(ItineraryRequest request) {
+//        Map<String, Object> input = new HashMap<>();
+//        input.put("request", request);
+//        String baseInput = toJsonString(input);
+//
+//        String contradictionWarning = null;
+//        if (request.getConversationId() != null && !request.getConversationId().isBlank()) {
+//            // 这里需要从之前检测的矛盾中获取，建议将 contradictionWarning 存储到 request 或通过参数传递
+//
+//        }
+//        if (contradictionWarning != null && !contradictionWarning.isBlank()) {
+//            baseInput = baseInput + contradictionWarning;
+//        }
+//
+//        String skillContext = skillService.buildSkillContext(request.getSkillIds());
+//        if (skillContext != null && !skillContext.isBlank()) {
+//            return baseInput + skillContext;
+//        }
+//        return baseInput;
+//    }
+
+
+    // 修改方法签名
+    private String buildUserInputJson(ItineraryRequest request, String contradictionWarning) {
         Map<String, Object> input = new HashMap<>();
         input.put("request", request);
         String baseInput = toJsonString(input);
+
+        if (contradictionWarning != null && !contradictionWarning.isBlank()) {
+            baseInput = contradictionWarning + "\n\n" + baseInput;
+        }
+
         String skillContext = skillService.buildSkillContext(request.getSkillIds());
         if (skillContext != null && !skillContext.isBlank()) {
             return baseInput + skillContext;
@@ -2060,4 +2422,124 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             }
         }
     }
+
+
+
+
+
+
+    ////任务二
+    private String buildContradictionWarning(EntityTracker.Contradiction contradiction) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n\n 检测到与之前对话的矛盾：\n");
+        for (String conflict : contradiction.getConflicts()) {
+            sb.append("- ").append(conflict).append("\n");
+        }
+        sb.append("请确认用户的最终意图。\n");
+        return sb.toString();
+    }
+
+    private String buildEnhancedSystemPrompt(ConversationContextManager.OptimizedContext context,
+                                             EntityTracker.ExtractedEntities entities, MemoryManager.WorkingMemory workingMemory,
+                                             String token) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(EXECUTE_SYSTEM_PROMPT_PREFIX);
+
+        // 添加历史摘要
+        if (context != null && context.getSummary() != null && !context.getSummary().isBlank()) {
+            sb.append("\n\n").append("【对话历史摘要】\n").append(context.getSummary()).append("\n");
+        }
+
+        // 添加已识别的实体信息
+        if (entities != null) {
+            boolean hasInfo = false;
+            StringBuilder entitySb = new StringBuilder("\n\n## 已识别的信息（多轮对话累计）\n");
+            if (entities.getDestination() != null) {
+                entitySb.append("- 目的地：").append(entities.getDestination()).append("\n");
+                hasInfo = true;
+            }
+            if (entities.getDays() != null) {
+                entitySb.append("- 天数：").append(entities.getDays()).append("天\n");
+                hasInfo = true;
+            }
+            if (entities.getBudgetLevel() != null) {
+                entitySb.append("- 预算：").append(entities.getBudgetLevel()).append("\n");
+                hasInfo = true;
+            }
+            if (entities.getInterests() != null && !entities.getInterests().isEmpty()) {
+                entitySb.append("- 兴趣偏好：").append(String.join("、", entities.getInterests())).append("\n");
+                hasInfo = true;
+            }
+            if (hasInfo) {
+                sb.append(entitySb.toString());
+            }
+        }
+
+        // 添加工作记忆
+        if (workingMemory != null && workingMemory.getDraftPlan() != null) {
+            sb.append("\n\n## 当前任务状态\n");
+            sb.append("- 已有行程草案：已生成").append(workingMemory.getDraftPlan().getTotalDays()).append("天行程\n");
+            if (workingMemory.getCompletedSteps() != null && !workingMemory.getCompletedSteps().isEmpty()) {
+                sb.append("- 已完成：").append(String.join(", ", workingMemory.getCompletedSteps())).append("\n");
+            }
+        }
+
+        // 添加长期记忆（用户画像）
+        try {
+            Integer userId = Integer.parseInt(tokenUtil.getUser(token).getId().toString());
+            String userProfile = memoryManager.buildUserProfileContext(userId);
+            if (userProfile != null && !userProfile.isBlank()) {
+                sb.append(userProfile);
+            }
+        } catch (Exception e) {
+        }
+
+        return sb.toString();
+    }
+
+    private String detectActionType(String userPrompt) {
+        if (userPrompt == null) return "UNKNOWN";
+        if (userPrompt.contains("删除") || userPrompt.contains("去掉") ||
+                userPrompt.contains("移除") || userPrompt.contains("减少") ||
+                userPrompt.contains("删掉")) {
+            return "DELETE";
+        }
+        if (userPrompt.contains("增加") || userPrompt.contains("添加") || userPrompt.contains("新增")) {
+            return "ADD";
+        }
+        Pattern daysPattern = Pattern.compile("(改为|改成|变为|增加|减少)\\s*(\\d+)\\s*天");
+        Matcher daysMatcher = daysPattern.matcher(userPrompt);
+        if (daysMatcher.find()) {
+            if (!userPrompt.matches("第\\d+天.*")) {
+                return "UPDATE_DAYS";
+            }
+        }
+        if (userPrompt.contains("改成") || userPrompt.contains("换成") || userPrompt.contains("修改") ||
+                userPrompt.contains("变为")) {
+            return "MODIFY";
+        }
+        if (userPrompt.contains("预算")) {
+            if (userPrompt.contains("改成") || userPrompt.contains("调整") || userPrompt.contains("增加") || userPrompt.contains("减少")) {
+                return "UPDATE_BUDGET";
+            }
+        }
+
+        return "UNKNOWN";
+    }
+    private int extractDaysFromPrompt(String prompt) {
+        if (prompt == null || prompt.isBlank()) return 0;
+
+        // 匹配数字+天的模式
+        Pattern pattern = Pattern.compile("(\\d+)\\s*天");
+        Matcher matcher = pattern.matcher(prompt);
+        if (matcher.find()) {
+            try {
+                return Integer.parseInt(matcher.group(1));
+            } catch (NumberFormatException e) {
+                log.warn("提取天数失败: {}", matcher.group(1));
+            }
+        }
+        return 0;
+    }
+
 }

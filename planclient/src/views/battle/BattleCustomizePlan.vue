@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="customize-shell">
     <div class="customize-main" :class="{ 'with-panel': !agentPanelCollapsed }">
       <header class="top-bar">
@@ -59,6 +59,14 @@
                     <button v-for="item in interestOptions" :key="item.value" class="chip-pill"
                       :class="[{ active: request.interests.includes(item.value) }, `chip-${item.value}`]"
                       @click="toggleInterest(item.value)">{{ item.label }}</button>
+                  </div>
+                </div>
+                <div class="input-card full-width" v-if="mySkills.length > 0">
+                  <span class="label-text">🧩 启用技能</span>
+                  <div class="chips-container">
+                    <button v-for="skill in mySkills" :key="skill.id" class="chip-pill chip-skill"
+                      :class="{ active: request.skillIds?.includes(skill.id) }"
+                      @click="toggleSkill(skill.id)">{{ skill.name }}</button>
                   </div>
                 </div>
                 <div class="input-card input-card-entry">
@@ -245,6 +253,7 @@ import {
 import type { ItineraryPlan, ItineraryRequest, PhaseData, GenerationStats } from '../../api/itinerary'
 import { linkItinerary, getConversationByItineraryId } from '../../api/conversation'
 import { goBackByAppRule } from '../../composables/useBackHandler'
+import { listMySkills, type SkillVO } from '../../api/skill'
 import AgentPanel from './AgentPanel.vue'
 import './agent-panel-styles.css'
 
@@ -287,6 +296,7 @@ const generationStats = ref<GenerationStats | null>(null)
 const refineStats = ref<GenerationStats | null>(null)
 const loadedStats = ref<GenerationStats | null>(null)
 const activeConversationId = ref<string | null>(null)
+const mySkills = ref<SkillVO[]>([])
 
 const itineraryId = computed(() => String(route.query.itineraryId || ''))
 const isEditMode = computed(() => itineraryId.value.length > 0)
@@ -615,7 +625,7 @@ const normalizeRouteType = (v: string) => routeTypeOptions.includes(v) ? v : DEF
 
 const request = reactive<ItineraryRequest>({
   destination: Array.isArray(route.query.destination) ? String(route.query.destination[0] || '') : String(route.query.destination || ''),
-  days: 3, interests: [], budgetLevel: 'medium', additionalNotes: ''
+  days: 3, interests: [], budgetLevel: 'medium', additionalNotes: '', skillIds: []
 })
 
 const draggingItem = ref<{ dayNumber: number; index: number } | null>(null)
@@ -629,6 +639,13 @@ const formatCurrency = (v: number) => `￥${v.toLocaleString('zh-CN')}`
 const toggleInterest = (v: string) => {
   const exists = request.interests.includes(v)
   request.interests = exists ? request.interests.filter(i => i !== v) : [...request.interests, v]
+}
+
+const toggleSkill = (skillId: string) => {
+  if (!request.skillIds) request.skillIds = []
+  const idx = request.skillIds.indexOf(skillId)
+  if (idx >= 0) request.skillIds.splice(idx, 1)
+  else request.skillIds.push(skillId)
 }
 
 const validateRequest = () => {
@@ -906,7 +923,15 @@ onMounted(async () => {
   if (route.query.destination) request.destination = String(route.query.destination)
   if (route.query.convId) activeConversationId.value = String(route.query.convId)
   if (itineraryId.value) await loadDetailForEdit()
+  fetchMySkills()
 })
+
+async function fetchMySkills() {
+  try {
+    const r = await listMySkills()
+    mySkills.value = (r as any).data || []
+  } catch { /* ignore */ }
+}
 </script>
 
 <style scoped>
@@ -1278,6 +1303,18 @@ onMounted(async () => {
   color: #fff;
   transform: translateY(-1px);
   box-shadow: 0 3px 10px rgba(51, 133, 255, 0.3);
+}
+
+.chip-skill {
+  background: #faf5ff;
+  color: #7c3aed;
+  border-color: #e9d5ff;
+}
+
+.chip-skill.active {
+  background: #7c3aed;
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(124, 58, 237, 0.3);
 }
 
 textarea {

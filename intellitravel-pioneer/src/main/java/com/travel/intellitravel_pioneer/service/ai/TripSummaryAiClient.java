@@ -6,4 +6,6 @@ import com.travel.intellitravel_pioneer.vo.trip.TripSummaryAiResult;
 public interface TripSummaryAiClient {
 
     TripSummaryAiResult summarizeTrip(String token, TripSummaryAiRequest request);
+
+    String summarizeText(String text);
 }
