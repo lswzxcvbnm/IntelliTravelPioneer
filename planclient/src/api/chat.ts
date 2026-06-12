@@ -1,4 +1,4 @@
-import { API_BASE_URL, http } from '../config/api'
+import { API_BASE_URL } from '../config/api'
 
 export interface ChatMessage {
     role: 'user' | 'assistant'

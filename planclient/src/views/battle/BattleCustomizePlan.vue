@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
+﻿﻿<template>
   <div class="customize-shell">
     <div class="customize-main" :class="{ 'with-panel': !agentPanelCollapsed }">
       <header class="top-bar">
@@ -292,7 +292,7 @@ import {
   updateItinerary
 } from '../../api/itinerary'
 import type { ItineraryPlan, ItineraryRequest, PhaseData, GenerationStats } from '../../api/itinerary'
-import { linkItinerary, getConversationByItineraryId, getConversationDetail } from '../../api/conversation'
+import { linkItinerary, getConversationByItineraryId, getConversationDetail, type AgentMessageVO } from '../../api/conversation'
 import { goBackByAppRule } from '../../composables/useBackHandler'
 import { listMySkills, type SkillVO } from '../../api/skill'
 import { streamChat, type ChatMessage } from '../../api/chat'
