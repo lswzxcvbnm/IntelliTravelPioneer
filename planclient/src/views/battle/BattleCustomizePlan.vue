@@ -1,4 +1,4 @@
-﻿<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="customize-shell">
     <div class="customize-main" :class="{ 'with-panel': !agentPanelCollapsed }">
       <header class="top-bar">
@@ -11,6 +11,9 @@
           <button type="button"
             class="top-bar-toggle-panel" :class="{ active: !agentPanelCollapsed }"
             @click="agentPanelCollapsed = !agentPanelCollapsed">AI</button>
+          <button type="button"
+            class="top-bar-toggle-panel top-bar-chat-btn" :class="{ active: showChatPanel }"
+            @click="toggleChatPanel">💬 对话</button>
         </div>
       </header>
 
@@ -221,6 +224,7 @@
     </div>
 
     <AgentPanel
+      v-if="!showChatPanel"
       :collapsed="agentPanelCollapsed"
       :is-generating="isAgentGenerating"
       :is-done="isAgentDone"
@@ -236,6 +240,43 @@
       :show-logs="showFullSummary"
       @toggle-logs="toggleSummaryDetail"
     />
+
+    <!-- Chat Panel -->
+    <aside class="chat-panel" v-if="showChatPanel && !agentPanelCollapsed">
+      <div class="chat-header">
+        <span>💬 AI 对话</span>
+        <button class="chat-close-btn" @click="showChatPanel = false">✕</button>
+      </div>
+      <div class="chat-body" ref="chatBodyRef">
+        <div v-if="chatMessages.length === 0 && !isChatLoading" class="chat-empty">
+          <p>👋 你好！我是你的旅行助手</p>
+          <p class="chat-empty-sub">问我任何关于旅行的问题，我会尽力帮你解答～</p>
+        </div>
+        <div v-for="(msg, i) in chatMessages" :key="i" class="chat-bubble" :class="msg.role">
+          <span class="chat-role">{{ msg.role === 'user' ? '你' : '🤖' }}</span>
+          <div class="chat-content" v-html="renderChatContent(msg.content)"></div>
+        </div>
+        <div v-if="isChatLoading && streamingContent" class="chat-bubble assistant">
+          <span class="chat-role">🤖</span>
+          <div class="chat-content" v-html="renderChatContent(streamingContent)"></div>
+        </div>
+        <div v-if="isChatLoading && !streamingContent" class="chat-typing">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <input
+          v-model="chatInput"
+          class="chat-input"
+          placeholder="输入消息，按回车发送..."
+          :disabled="isChatLoading"
+          @keydown.enter.exact.prevent="sendChatMessage"
+        />
+        <button class="chat-send-btn" :disabled="isChatLoading || !chatInput.trim()" @click="sendChatMessage">
+          发送
+        </button>
+      </div>
+    </aside>
   </div>
 </template>
 
@@ -251,9 +292,10 @@ import {
   updateItinerary
 } from '../../api/itinerary'
 import type { ItineraryPlan, ItineraryRequest, PhaseData, GenerationStats } from '../../api/itinerary'
-import { linkItinerary, getConversationByItineraryId } from '../../api/conversation'
+import { linkItinerary, getConversationByItineraryId, getConversationDetail } from '../../api/conversation'
 import { goBackByAppRule } from '../../composables/useBackHandler'
 import { listMySkills, type SkillVO } from '../../api/skill'
+import { streamChat, type ChatMessage } from '../../api/chat'
 import AgentPanel from './AgentPanel.vue'
 import './agent-panel-styles.css'
 
@@ -270,6 +312,7 @@ interface LogEntry {
 // ===== 新增响应式状态 =====
 const showForm = ref(true)
 const agentPanelCollapsed = ref(false)
+const showChatPanel = ref(false)
 const refineHistory = ref<Array<{ prompt: string; success: boolean }>>([])
 
 const budgetLabel = computed(() => {
@@ -297,6 +340,14 @@ const refineStats = ref<GenerationStats | null>(null)
 const loadedStats = ref<GenerationStats | null>(null)
 const activeConversationId = ref<string | null>(null)
 const mySkills = ref<SkillVO[]>([])
+
+// Chat state
+const chatMessages = ref<Array<{ role: string; content: string }>>([])
+const chatInput = ref('')
+const isChatLoading = ref(false)
+const streamingContent = ref('')
+const chatConversationId = ref<string | null>(localStorage.getItem('chatConvId'))
+const chatBodyRef = ref<HTMLElement | null>(null)
 
 const itineraryId = computed(() => String(route.query.itineraryId || ''))
 const isEditMode = computed(() => itineraryId.value.length > 0)
@@ -931,6 +982,90 @@ async function fetchMySkills() {
     const r = await listMySkills()
     mySkills.value = (r as any).data || []
   } catch { /* ignore */ }
+}
+
+// ===== Chat functions =====
+async function loadChatHistory() {
+  const convId = chatConversationId.value
+  if (!convId) return
+  try {
+    const res = await getConversationDetail(convId)
+    if (res.data?.data?.messages) {
+      const msgs = res.data.data.messages
+        .filter((m: AgentMessageVO) => m.role === 'user' || m.role === 'assistant')
+        .map((m: AgentMessageVO) => ({ role: m.role, content: m.content }))
+      if (msgs.length > 0) {
+        chatMessages.value = msgs
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+function toggleChatPanel() {
+  showChatPanel.value = !showChatPanel.value
+  if (showChatPanel.value) {
+    agentPanelCollapsed.value = false
+    if (chatMessages.value.length === 0) {
+      loadChatHistory()
+    }
+    nextTick(() => scrollChatToBottom())
+  }
+}
+
+function scrollChatToBottom() {
+  nextTick(() => {
+    if (chatBodyRef.value) {
+      chatBodyRef.value.scrollTop = chatBodyRef.value.scrollHeight
+    }
+  })
+}
+
+function renderChatContent(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+}
+
+async function sendChatMessage() {
+  const msg = chatInput.value.trim()
+  if (!msg || isChatLoading.value) return
+
+  chatMessages.value.push({ role: 'user', content: msg })
+  chatInput.value = ''
+  streamingContent.value = ''
+  isChatLoading.value = true
+  scrollChatToBottom()
+
+  try {
+    await streamChat(msg, chatConversationId.value, {
+      onToken: (token: string) => {
+        streamingContent.value += token
+        scrollChatToBottom()
+      },
+      onDone: (data: { conversationId: string; messageId: string }) => {
+        if (streamingContent.value) {
+          chatMessages.value.push({ role: 'assistant', content: streamingContent.value })
+          streamingContent.value = ''
+        }
+        if (data.conversationId) {
+          chatConversationId.value = data.conversationId
+          localStorage.setItem('chatConvId', data.conversationId)
+        }
+        isChatLoading.value = false
+        scrollChatToBottom()
+      },
+      onError: (error: string) => {
+        chatMessages.value.push({ role: 'assistant', content: '抱歉，出了点问题：' + error })
+        isChatLoading.value = false
+      }
+    })
+  } catch {
+    chatMessages.value.push({ role: 'assistant', content: '抱歉，网络出问题了，请稍后重试。' })
+    isChatLoading.value = false
+  }
 }
 </script>
 
@@ -1843,5 +1978,158 @@ textarea:focus { background: rgba(51, 133, 255, 0.03); border-radius: 6px; }
 /* Panel collapse */
 .customize-main.with-panel {
   /* keep existing layout when panel is visible */
+}
+
+/* ===== Chat Panel ===== */
+.chat-panel {
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid rgba(51, 133, 255, 0.1);
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1a2e;
+}
+
+.chat-close-btn {
+  border: none;
+  background: none;
+  font-size: 18px;
+  color: #909399;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all .2s;
+}
+.chat-close-btn:hover { background: #f5f5f5; color: #333; }
+
+.chat-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #909399;
+}
+.chat-empty p { margin: 0 0 6px; font-size: 15px; }
+.chat-empty-sub { font-size: 13px !important; }
+
+.chat-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 90%;
+}
+
+.chat-bubble.user {
+  align-self: flex-end;
+}
+
+.chat-bubble.assistant {
+  align-self: flex-start;
+}
+
+.chat-role {
+  font-size: 11px;
+  color: #909399;
+  padding: 0 2px;
+}
+
+.chat-content {
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.chat-bubble.user .chat-content {
+  background: linear-gradient(135deg, #8AC4FF, #3385FF);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-bubble.assistant .chat-content {
+  background: #f5f7fa;
+  color: #303133;
+  border-bottom-left-radius: 4px;
+}
+
+.chat-typing {
+  align-self: flex-start;
+  display: flex;
+  gap: 5px;
+  padding: 12px 16px;
+}
+.chat-typing span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c0c4cc;
+  animation: chat-bounce 1.4s infinite ease-in-out both;
+}
+.chat-typing span:nth-child(1) { animation-delay: -0.32s; }
+.chat-typing span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes chat-bounce {
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
+}
+
+.chat-input-area {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #e4e7ed;
+  border-radius: 20px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .2s;
+}
+.chat-input:focus { border-color: #8AC4FF; }
+
+.chat-send-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #8AC4FF, #3385FF);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .2s;
+}
+.chat-send-btn:hover { opacity: .9; }
+.chat-send-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.top-bar-chat-btn {
+  border-color: #e9d5ff !important;
+  color: #7c3aed !important;
+}
+.top-bar-chat-btn.active {
+  background: #faf5ff !important;
+  border-color: #7c3aed !important;
 }
 </style>
