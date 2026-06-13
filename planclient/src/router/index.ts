@@ -4,7 +4,6 @@ import Login from '../views/user/Login.vue'
 import Register from '../views/user/Register.vue'
 
 const BattleCockpit = () => import('../views/battle/BattleCockpit.vue')
-const BattleCustomizePlan = () => import('../views/battle/BattleCustomizePlan.vue')
 const ToolsManagement = () => import('../views/battle/ToolsManagement.vue')
 const SkillManage = () => import('../views/battle/SkillManage.vue')
 

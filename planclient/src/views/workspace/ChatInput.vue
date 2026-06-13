@@ -2,10 +2,12 @@
   <div class="ws-chat-composer">
     <div class="ws-composer-inner">
       <textarea
+        ref="textareaRef"
         v-model="inputText"
         @keydown.enter.exact.prevent="handleSend"
+        @input="autoResize"
         :placeholder="placeholder"
-        rows="2"
+        rows="1"
         :disabled="disabled"
       ></textarea>
       <button
@@ -14,7 +16,7 @@
         :disabled="!canSend || disabled"
       >
         <span v-if="!isGenerating && !isRefining" class="ws-send-icon">↑</span>
-        {{ isGenerating ? '生成中' : isRefining ? '优化中' : '' }}
+        <span v-else class="ws-send-text">{{ isGenerating ? '生成中' : '优化中' }}</span>
       </button>
     </div>
   </div>
@@ -28,7 +30,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 
 const props = defineProps<{
   placeholder?: string
@@ -46,15 +48,29 @@ const emit = defineEmits<{
 }>()
 
 const inputText = ref('')
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
 const canSend = computed(() => {
   return inputText.value.trim().length > 0
 })
 
+function autoResize() {
+  nextTick(() => {
+    const el = textareaRef.value
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+  })
+}
+
 function handleSend() {
   if (!canSend.value || props.disabled) return
   emit('send', inputText.value.trim())
   inputText.value = ''
+  nextTick(() => {
+    const el = textareaRef.value
+    if (el) el.style.height = 'auto'
+  })
 }
 </script>
 
@@ -80,16 +96,16 @@ function handleSend() {
 
 .ws-composer-inner textarea {
   flex: 1;
-  min-height: 60px;
-  max-height: 150px;
-  padding: 12px 16px;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 10px 14px;
   border: 1.5px solid #EDF2F7;
-  border-radius: 13px;
+  border-radius: 12px;
   background: #FAFCFF;
   font-family: inherit;
   font-size: 14px;
   color: #1E3A5F;
-  line-height: 1.6;
+  line-height: 1.5;
   outline: none;
   resize: none;
   transition: border-color 0.2s, background 0.2s;
@@ -103,11 +119,11 @@ function handleSend() {
 
 .ws-send-btn {
   flex-shrink: 0;
-  width: 56px;
-  height: 56px;
-  min-width: 56px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
   padding: 0;
-  border-radius: 14px;
+  border-radius: 12px;
   border: none;
   background: linear-gradient(135deg, #3385FF 0%, #1A6FFF 100%);
   color: #fff;
@@ -115,16 +131,21 @@ function handleSend() {
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 3px 14px rgba(51, 133, 255, 0.28);
+  box-shadow: 0 2px 10px rgba(51, 133, 255, 0.25);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .ws-send-icon {
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
   font-weight: 400;
+}
+
+.ws-send-text {
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .ws-send-btn:hover:not(:disabled) {

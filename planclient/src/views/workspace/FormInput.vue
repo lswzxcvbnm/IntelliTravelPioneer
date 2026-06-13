@@ -18,11 +18,16 @@
       </div>
 
       <div class="ws-form-panel">
-        <div class="ws-form-row ws-form-main-row">
+        <!-- 目的地（独占一行，更宽敞） -->
+        <div class="ws-form-row ws-form-dest-row">
           <label class="ws-field-dest">
             <span class="ws-label-sm">目的地</span>
             <input v-model.trim="destination" class="ws-input-dest" placeholder="你想去哪里？" />
           </label>
+        </div>
+
+        <!-- 天数 + 预算（同一行） -->
+        <div class="ws-form-row ws-form-meta-row">
           <div class="field-inline-group">
             <span class="ws-label-sm">天数</span>
             <div class="ws-stepper-compact">
@@ -143,7 +148,18 @@ function handleSubmit() {
 </script>
 
 <style scoped>
-.ws-form-wrapper { position: relative; }
+.ws-form-wrapper {
+  position: relative;
+  background: #fff;
+  border: 1px solid rgba(51, 133, 255, 0.1);
+  border-radius: 16px;
+  padding: 14px 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.03);
+  transition: box-shadow 0.2s;
+}
+.ws-form-wrapper:hover {
+  box-shadow: 0 6px 32px rgba(51, 133, 255, 0.1), 0 2px 6px rgba(0, 0, 0, 0.04);
+}
 .ws-form-wrapper.collapsed .ws-form-panel { display: none; }
 .ws-form-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 0 2px; }
 .ws-form-header-title { font-size: 12px; font-weight: 700; color: #1E3A5F; }
@@ -159,10 +175,11 @@ function handleSubmit() {
 .ws-summary-toggle:hover { background: #3385FF; color: #fff; }
 .ws-summary-arrow { font-size: 11px; margin-right: 2px; }
 .ws-form-panel { display: flex; flex-direction: column; gap: 10px; }
-.ws-form-row { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid rgba(51, 133, 255, 0.08); border-radius: 12px; padding: 10px 14px; transition: border-color 0.2s; }
+.ws-form-row { display: flex; align-items: center; gap: 10px; background: #FAFCFF; border: 1px solid rgba(51, 133, 255, 0.08); border-radius: 12px; padding: 10px 14px; transition: border-color 0.2s; }
 .ws-form-row:hover { border-color: rgba(51, 133, 255, 0.14); }
-.ws-form-main-row { gap: 14px; }
-.ws-field-dest { flex: 2; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ws-form-dest-row { padding: 12px 14px; }
+.ws-form-meta-row { gap: 16px; justify-content: flex-start; }
+.ws-field-dest { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .ws-input-dest { width: 100%; padding: 9px 13px; border: 1.5px solid #D8E2EF; border-radius: 10px; background: #FAFCFF; font-family: inherit; font-size: 14px; color: #1E3A5F; outline: none; box-sizing: border-box; font-weight: 500; transition: border-color 0.2s, box-shadow 0.2s; }
 .ws-input-dest:focus { border-color: #3385FF; box-shadow: 0 0 0 3px rgba(51, 133, 255, 0.08); background: #fff; }
 .ws-input-dest::placeholder { color: #A8BDD0; font-weight: 400; }

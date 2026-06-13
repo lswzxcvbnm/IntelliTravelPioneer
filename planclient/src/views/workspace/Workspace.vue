@@ -5,9 +5,6 @@
       <BackButton class="ws-back-btn">← 返回</BackButton>
       <h2 class="ws-header-title">{{ editablePlan?.title || pageTitle }}</h2>
       <div class="ws-header-actions">
-        <button class="ws-action-btn" :class="{ active: !agentPanelCollapsed }" @click="agentPanelCollapsed = !agentPanelCollapsed">
-          AI
-        </button>
         <button v-if="editablePlan" class="ws-action-btn" @click="handleSave" :disabled="isSaving">
           {{ isSaving ? '保存中...' : '保存' }}
         </button>
@@ -48,7 +45,10 @@
               <div class="ws-avatar user-avatar">👤</div>
               <div class="ws-bubble-wrapper">
                 <div class="ws-bubble user">{{ msg.content }}</div>
-                <span class="ws-time">{{ formatTime(msg.time) }}</span>
+                <div class="ws-msg-meta">
+                  <span class="ws-time">{{ formatTime(msg.time) }}</span>
+                  <span class="ws-msg-status sent">✓ 已发送</span>
+                </div>
               </div>
             </template>
 
@@ -57,8 +57,12 @@
               <div class="ws-avatar assistant-avatar">🤖</div>
               <div class="ws-bubble-wrapper">
                 <div class="ws-bubble assistant">
-                  <!-- 文本内容 -->
-                  <div v-if="msg.content" class="ws-bubble-text" v-html="formatContent(msg.content)"></div>
+                  <!-- 文本内容（支持展开/收起） -->
+                  <div v-if="msg.content && (!isLongContent(msg.content) || isMessageExpanded(msg.id))" class="ws-bubble-text" v-html="formatContent(msg.content)"></div>
+                  <div v-else-if="msg.content && isLongContent(msg.content)" class="ws-bubble-text" v-html="formatContent(getTruncatedContent(msg.content))"></div>
+                  <button v-if="isLongContent(msg.content)" class="ws-expand-btn" @click="toggleMessageExpand(msg.id)">
+                    {{ isMessageExpanded(msg.id) ? '收起' : '展开全部' }}
+                  </button>
 
                   <!-- 内联工具调用卡片 -->
                   <ToolCallCard
@@ -152,6 +156,9 @@
       <aside class="ws-canvas">
         <div class="ws-canvas-header">
           <h3>行程画布</h3>
+          <button v-if="editablePlan" class="ws-save-btn-compact" @click="handleSave" :disabled="isSaving">
+            {{ isSaving ? '保存中...' : '💾 保存' }}
+          </button>
         </div>
 
         <div class="ws-canvas-body">
@@ -177,101 +184,89 @@
               <span>📍 {{ totalItems }} 个地点</span>
             </div>
 
-            <!-- 天数区块 -->
-            <div
-              v-for="day in editablePlan.dailyPlans"
-              :key="day.dayNumber"
-              class="ws-day-section"
-              @dragover.prevent
-              @drop="onDayDrop(day.dayNumber)"
-            >
-              <div class="ws-day-header">
-                <span class="ws-day-num">{{ day.dayNumber }}</span>
-                <span class="ws-day-label">Day {{ day.dayNumber }}</span>
-              </div>
+            <!-- 天数区块（带时间线） -->
+            <div class="ws-timeline">
+              <div
+                v-for="(day, dayIdx) in editablePlan.dailyPlans"
+                :key="day.dayNumber"
+                class="ws-day-section"
+                @dragover.prevent
+                @drop="onDayDrop(day.dayNumber)"
+              >
+                <!-- 时间线节点 -->
+                <div class="ws-timeline-node">
+                  <span class="ws-day-num">{{ day.dayNumber }}</span>
+                  <div class="ws-timeline-line" v-if="dayIdx < editablePlan.dailyPlans.length - 1"></div>
+                </div>
 
-              <TransitionGroup name="item-list" tag="div" class="ws-items">
-                <div
-                  v-for="(item, ii) in day.items"
-                  :key="`${day.dayNumber}-${ii}`"
-                  class="ws-item"
-                  :class="['type-' + getTypeClass(item.type), { expanded: isItemExpanded(day.dayNumber, ii) }]"
-                >
-                  <div class="ws-item-header" @click="toggleItemExpand(day.dayNumber, ii)">
-                    <span class="ws-item-icon">{{ TYPE_ICON_MAP[item.type] || '📍' }}</span>
-                    <span class="ws-item-name">{{ item.name || '未命名' }}</span>
-                    <span class="ws-item-expand-arrow">{{ isItemExpanded(day.dayNumber, ii) ? '▲' : '▼' }}</span>
-                    <div class="ws-item-actions">
-                      <button @click.stop="handleDeleteItem(day.dayNumber, ii, item.name)" class="ws-item-btn delete">删除</button>
-                    </div>
+                <div class="ws-day-content">
+                  <div class="ws-day-header">
+                    <span class="ws-day-label">Day {{ day.dayNumber }}</span>
                   </div>
 
-                  <!-- 可展开详情 -->
-                  <transition name="item-expand">
-                    <div v-if="isItemExpanded(day.dayNumber, ii)" class="ws-item-detail">
-                      <div v-if="item.description && item.description !== '暂无描述'" class="ws-item-detail-row">
-                        <span class="ws-item-detail-icon">📝</span>
-                        <span class="ws-item-detail-text">{{ item.description }}</span>
+                  <TransitionGroup name="item-list" tag="div" class="ws-items">
+                    <div
+                      v-for="(item, ii) in day.items"
+                      :key="`${day.dayNumber}-${ii}`"
+                      class="ws-item"
+                      :class="['type-' + getTypeClass(item.type), { expanded: isItemExpanded(day.dayNumber, ii) }]"
+                      draggable="true"
+                      @dragstart="onDragStart($event, day.dayNumber, ii)"
+                    >
+                      <div class="ws-item-header" @click="toggleItemExpand(day.dayNumber, ii)">
+                        <span class="ws-item-type-badge" :class="'badge-' + getTypeClass(item.type)">{{ item.type }}</span>
+                        <span class="ws-item-name">{{ item.name || '未命名' }}</span>
+                        <span class="ws-item-expand-arrow">{{ isItemExpanded(day.dayNumber, ii) ? '▲' : '▼' }}</span>
+                        <div class="ws-item-actions">
+                          <button @click.stop="moveItem(day.dayNumber, ii, 'up')" class="ws-item-btn move" :disabled="ii === 0" title="上移">↑</button>
+                          <button @click.stop="moveItem(day.dayNumber, ii, 'down')" class="ws-item-btn move" :disabled="ii === day.items.length - 1" title="下移">↓</button>
+                          <button @click.stop="handleDeleteItem(day.dayNumber, ii, item.name)" class="ws-item-btn delete" title="删除">×</button>
+                        </div>
                       </div>
-                      <div v-if="item.location?.name" class="ws-item-detail-row">
-                        <span class="ws-item-detail-icon">📍</span>
-                        <span class="ws-item-detail-text">{{ item.location.name }}</span>
-                      </div>
-                      <div v-if="hasValidCoords(item.location)" class="ws-item-detail-row">
-                        <span class="ws-item-detail-icon">🌐</span>
-                        <span class="ws-item-detail-text">{{ item.location.lat }}, {{ item.location.lng }}</span>
-                      </div>
-                      <div v-if="hasValidCoords(item.location)" class="ws-item-map-row">
-                        <a
-                          class="ws-item-map-link"
-                          :href="`https://uri.amap.com/marker?position=${item.location.lng},${item.location.lat}`"
-                          target="_blank"
-                          rel="noopener"
-                        >
-                          🗺️ 在地图中查看
-                        </a>
-                      </div>
-                    </div>
-                  </transition>
-                </div>
-              </TransitionGroup>
 
-              <div v-if="day.items.length === 0" class="ws-empty-day">
-                拖拽或点击「添加」安排今日行程
+                      <!-- 可展开详情 -->
+                      <transition name="item-expand">
+                        <div v-if="isItemExpanded(day.dayNumber, ii)" class="ws-item-detail">
+                          <div class="ws-detail-grid">
+                            <div v-if="item.description && item.description !== '暂无描述'" class="ws-detail-card">
+                              <div class="ws-detail-card-label">📝 描述</div>
+                              <div class="ws-detail-card-value">{{ item.description }}</div>
+                            </div>
+                            <div v-if="item.location?.name" class="ws-detail-card">
+                              <div class="ws-detail-card-label">📍 地点</div>
+                              <div class="ws-detail-card-value">{{ item.location.name }}</div>
+                            </div>
+                            <div v-if="hasValidCoords(item.location)" class="ws-detail-card">
+                              <div class="ws-detail-card-label">🌐 坐标</div>
+                              <div class="ws-detail-card-value">{{ item.location.lat }}, {{ item.location.lng }}</div>
+                            </div>
+                          </div>
+                          <div v-if="hasValidCoords(item.location)" class="ws-item-map-row">
+                            <a
+                              class="ws-item-map-link"
+                              :href="`https://uri.amap.com/marker?position=${item.location.lng},${item.location.lat}`"
+                              target="_blank"
+                              rel="noopener"
+                            >
+                              🗺️ 在地图中查看
+                            </a>
+                          </div>
+                        </div>
+                      </transition>
+                    </div>
+                  </TransitionGroup>
+
+                  <div v-if="day.items.length === 0" class="ws-empty-day">
+                    拖拽行程项到此处安排
+                  </div>
+                </div>
               </div>
             </div>
-
-            <!-- 保存按钮 -->
-            <button
-              class="primary ws-save-btn"
-              @click="handleSave"
-              :disabled="isSaving"
-            >
-              {{ isSaving ? '保存中...' : '💾 保存行程' }}
-            </button>
           </template>
         </div>
       </aside>
 
-      <!-- AgentPanel -->
-      <AgentPanel
-        v-if="!agentPanelCollapsed"
-        :collapsed="agentPanelCollapsed"
-        :is-generating="isAgentGenerating"
-        :is-done="isAgentDone"
-        :is-loading="isAgentLoading"
-        :current-action="currentAction"
-        :logs="agentLogs"
-        :total-days="editablePlan?.totalDays"
-        :route-count="totalItems"
-        :budget="editablePlan?.estimatedCost"
-        :token-stats="agentTokenStats"
-        :tool-stats="agentToolStats"
-        :execution-logs="agentExecutionLogs"
-        :show-logs="showAgentLogs"
-        @toggle-logs="showAgentLogs = !showAgentLogs"
-        @toggle-collapse="agentPanelCollapsed = !agentPanelCollapsed"
-      />
+
     </div>
   </div>
 </template>
@@ -292,8 +287,6 @@ import { extractActionFromLog, TYPE_ICON_MAP } from '../../constants/tool'
 import ToolCallCard from './ToolCallCard.vue'
 import ChatInput from './ChatInput.vue'
 import FormInput from './FormInput.vue'
-import AgentPanel from '../battle/AgentPanel.vue'
-import '../battle/agent-panel-styles.css'
 
 const router = useRouter()
 const route = useRoute()
@@ -318,8 +311,48 @@ const suggestedPrompts = [
   '帮我规划南京3天历史Citywalk之旅',
   '北京5天深度游，预算5000',
   '杭州2天一家大小，带小孩的优选路线',
+  '成都4天美食之旅，吃遍地道小吃',
+  '西安3天古都文化探索',
+  '厦门2天海岛休闲度假',
 ]
-const spIcons = ['🏛', '💼', '😂']
+const spIcons = ['🏛', '💼', '😂', '🍜', '🏯', '🏖️']
+
+// ===== 消息展开状态 =====
+const expandedMessages = ref<Set<string>>(new Set())
+
+function isMessageExpanded(msgId: string): boolean {
+  return expandedMessages.value.has(msgId)
+}
+
+function toggleMessageExpand(msgId: string) {
+  const s = new Set(expandedMessages.value)
+  if (s.has(msgId)) {
+    s.delete(msgId)
+  } else {
+    s.add(msgId)
+  }
+  expandedMessages.value = s
+}
+
+function isLongContent(content: string): boolean {
+  return !!content && content.length > 500
+}
+
+function getTruncatedContent(content: string): string {
+  if (!content || content.length <= 500) return content
+  return content.slice(0, 500) + '...'
+}
+
+// ===== 行程项移动 =====
+function moveItem(dayNum: number, idx: number, direction: 'up' | 'down') {
+  const day = editablePlan.value?.dailyPlans.find(d => d.dayNumber === dayNum)
+  if (!day) return
+  const newIdx = direction === 'up' ? idx - 1 : idx + 1
+  if (newIdx < 0 || newIdx >= day.items.length) return
+  const items = [...day.items]
+  ;[items[idx], items[newIdx]] = [items[newIdx], items[idx]]
+  day.items = items
+}
 
 // ===== 页面标题 =====
 const pageTitle = computed(() => {
@@ -334,13 +367,6 @@ const currentAction = ref('')
 const currentPhase = ref('')
 const liveLogs = ref<Array<{ type: string; icon: string; text: string }>>([])
 const activeStats = ref<GenerationStats | null>(null)
-
-// ===== AgentPanel 状态 =====
-const agentPanelCollapsed = ref(false)
-const showAgentLogs = ref(false)
-const agentLogs = ref<Array<{ type: 'phase' | 'thought' | 'tool'; message: string; phaseType?: string }>>([])
-const generationStats = ref<GenerationStats | null>(null)
-const refineStats = ref<GenerationStats | null>(null)
 
 // ===== 技能状态 =====
 const mySkills = ref<SkillVO[]>([])
@@ -358,88 +384,6 @@ const inputModes = [
 const inputPlaceholder = computed(() =>
   editablePlan.value ? '描述你想如何修改行程...' : '描述你的旅行目的地和需求...'
 )
-
-// ===== AgentPanel 计算属性 =====
-const isAgentGenerating = computed(() => isGenerating.value || isRefining.value)
-const isAgentDone = computed(() => !!editablePlan.value && !isRefining.value)
-const isAgentLoading = computed(() => agentLogs.value.length === 0 && isAgentGenerating.value)
-
-const agentTokenStats = computed(() => {
-  const stats = generationStats.value || refineStats.value
-  if (!stats) return undefined
-  return {
-    promptTokens: stats.totalPromptTokens,
-    completionTokens: stats.totalCompletionTokens,
-    totalTokens: stats.totalTokens,
-    apiCalls: stats.planCalls + stats.executeCalls + stats.verifyCalls
-  }
-})
-
-const agentToolStats = computed(() => {
-  const stats = generationStats.value || refineStats.value
-  if (!stats?.toolCalls) return undefined
-  const grouped = new Map<string, { name: string; displayName: string; count: number; successCount: number }>()
-  for (const tc of stats.toolCalls) {
-    const key = tc.displayName || tc.name
-    if (!grouped.has(key)) {
-      grouped.set(key, { name: key, displayName: key, count: 0, successCount: 0 })
-    }
-    const entry = grouped.get(key)!
-    entry.count++
-    if (tc.status === 'success') entry.successCount++
-  }
-  return Array.from(grouped.values()).map(entry => ({
-    ...entry,
-    status: entry.successCount > 0 ? 'success' as const : 'skipped' as const
-  }))
-})
-
-const agentExecutionLogs = computed(() => {
-  if (!agentLogs.value || agentLogs.value.length === 0) return undefined
-  return agentLogs.value
-    .filter(entry => !isEmptyEntry(entry))
-    .map(entry => {
-      if (entry.type === 'phase') {
-        return {
-          type: 'phase',
-          icon: entry.phaseType?.endsWith('_END') ? '✓' : '›',
-          text: entry.message
-        }
-      } else if (entry.type === 'thought') {
-        return {
-          type: 'thought',
-          icon: '💡',
-          text: truncateText(entry.message, 120)
-        }
-      } else if (entry.type === 'tool') {
-        return {
-          type: 'tool',
-          icon: '🔧',
-          text: entry.message
-        }
-      }
-      return { type: 'unknown', icon: '', text: entry.message }
-    })
-})
-
-const isEmptyEntry = (entry: { type: string; message: string }): boolean => {
-  if (!entry.message) return true
-  const trimmed = entry.message.trim()
-  if (trimmed.length === 0) return true
-  if (trimmed === 'THOUGHT:') return true
-  if (trimmed.startsWith('THOUGHT:') && trimmed.replace('THOUGHT:', '').trim().length === 0) return true
-  return false
-}
-
-const truncateText = (text: string, maxLength: number): string => {
-  if (!text) return ''
-  let msg = text
-  if (msg.startsWith('THOUGHT:')) {
-    msg = msg.replace('THOUGHT:', '').trim()
-  }
-  if (msg.length <= maxLength) return msg
-  return msg.substring(0, maxLength) + '...'
-}
 
 // ===== 工具调用解析 =====
 function parseToolType(toolCallsStr: string | null): 'itinerary' | 'tools' | null {
@@ -549,9 +493,7 @@ async function handleFormSubmit(request: {
 
   isGenerating.value = true
   liveLogs.value = []
-  agentLogs.value = []
   currentPhase.value = ''
-  generationStats.value = null
 
   try {
     await generateItineraryStream(
@@ -577,7 +519,6 @@ async function handleFormSubmit(request: {
       },
       (stats) => {
         activeStats.value = stats
-        generationStats.value = stats
         if (stats.toolCalls?.length) {
           updateMessage(assistMsgId, { toolCalls: JSON.stringify(stats.toolCalls) })
         }
@@ -597,9 +538,7 @@ async function handleFormSubmit(request: {
 async function runGenerate(msgId: string, userPrompt: string) {
   isGenerating.value = true
   liveLogs.value = []
-  agentLogs.value = []
   currentPhase.value = ''
-  generationStats.value = null
 
   try {
     const request = parseUserRequest(userPrompt)
@@ -626,7 +565,6 @@ async function runGenerate(msgId: string, userPrompt: string) {
       },
       (stats) => {
         activeStats.value = stats
-        generationStats.value = stats
         if (stats.toolCalls?.length) {
           updateMessage(msgId, { toolCalls: JSON.stringify(stats.toolCalls) })
         }
@@ -645,8 +583,6 @@ async function runGenerate(msgId: string, userPrompt: string) {
 async function runRefine(msgId: string, userPrompt: string) {
   isRefining.value = true
   liveLogs.value = []
-  agentLogs.value = []
-  refineStats.value = null
 
   try {
     const originalPlan = { ...editablePlan.value } as ItineraryPlan
@@ -676,7 +612,6 @@ async function runRefine(msgId: string, userPrompt: string) {
       },
       (stats) => {
         activeStats.value = stats
-        refineStats.value = stats
         if (stats.toolCalls?.length) {
           updateMessage(msgId, { toolCalls: JSON.stringify(stats.toolCalls) })
         }
@@ -695,8 +630,6 @@ async function runRefine(msgId: string, userPrompt: string) {
 // ===== 辅助方法 =====
 function addLog(type: string, icon: string, text: string) {
   liveLogs.value.push({ type, icon, text: text.slice(0, 200) })
-  // 同时推送到 AgentPanel 日志
-  agentLogs.value.push({ type: type as 'phase' | 'thought' | 'tool', message: text.slice(0, 200) })
 }
 
 /** 自动保存行程并关联到对话 */
@@ -1006,11 +939,12 @@ onBeforeRouteLeave(async (to, from, next) => {
 }
 
 .ws-suggested-prompts {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 10px;
-  justify-content: center;
-  margin-top: 8px;
+  margin-top: 12px;
+  width: 100%;
+  max-width: 600px;
 }
 
 .ws-sp-card {
@@ -1292,22 +1226,30 @@ onBeforeRouteLeave(async (to, from, next) => {
 .ws-log-icon { flex-shrink: 0; }
 .ws-log-text { word-break: break-all; }
 
-/* ====== 输入区域 ====== */
+/* ====== 输入区域（悬浮容器） ====== */
 .ws-input-area {
-  padding: 12px 16px;
-  border-top: 1px solid rgba(51, 133, 255, 0.08);
-  background: linear-gradient(180deg, #FFFFFF 0%, #FAFCFF 100%);
+  padding: 12px 20px 16px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ws-input-area > * {
+  width: 100%;
+  max-width: 680px;
 }
 
 /* ====== 模式切换标签 ====== */
 .ws-mode-tabs {
   display: flex;
   gap: 0;
-  margin-bottom: 12px;
-  background: #EEF1F6;
-  border-radius: 12px;
+  margin-bottom: 10px;
+  background: #E8EDF5;
+  border-radius: 10px;
   padding: 3px;
+  max-width: 280px;
+  align-self: center;
 }
 
 .ws-mode-tab {
@@ -1517,21 +1459,23 @@ onBeforeRouteLeave(async (to, from, next) => {
 
 .ws-item-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
+  align-items: center;
 }
 
 .ws-item-btn {
-  padding: 3px 8px;
-  border-radius: 5px;
+  padding: 4px 8px;
+  border-radius: 6px;
   border: none;
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.ws-item-btn.delete { color: #94A3B8; }
-.ws-item-btn.delete:hover { color: #EF4444; background: rgba(239, 68, 68, 0.06); }
 
 /* 行程项展开详情 */
 .ws-item-detail {
@@ -1668,6 +1612,193 @@ onBeforeRouteLeave(async (to, from, next) => {
   box-shadow: 0 5px 16px rgba(51, 133, 255, 0.35);
 }
 .ws-save-btn:disabled { background: #93c5fd; cursor: not-allowed; box-shadow: none; }
+
+/* ====== 消息状态指示 ====== */
+.ws-msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.ws-msg-status {
+  font-size: 11px;
+  color: #94A3B8;
+}
+.ws-msg-status.sent {
+  color: #10B981;
+}
+
+/* ====== 消息展开/收起 ====== */
+.ws-expand-btn {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 4px 12px;
+  border: 1px solid rgba(51, 133, 255, 0.2);
+  border-radius: 6px;
+  background: #F0F7FF;
+  color: #3385FF;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ws-expand-btn:hover {
+  background: #E0EFFF;
+  border-color: #3385FF;
+}
+
+/* ====== 时间线视觉 ====== */
+.ws-timeline {
+  position: relative;
+  padding-left: 24px;
+}
+
+.ws-timeline-node {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ws-timeline-line {
+  width: 2px;
+  flex: 1;
+  background: linear-gradient(180deg, #3385FF 0%, rgba(51, 133, 255, 0.2) 100%);
+  margin-top: 4px;
+  min-height: 60px;
+}
+
+.ws-day-section {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ws-day-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.ws-day-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+
+/* ====== 行程项类型徽章 ====== */
+.ws-item-type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.badge-spot {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3B82F6;
+}
+.badge-food {
+  background: rgba(245, 158, 11, 0.1);
+  color: #D97706;
+}
+.badge-traffic {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+.badge-hotel {
+  background: rgba(139, 92, 246, 0.1);
+  color: #7C3AED;
+}
+.badge-relax {
+  background: rgba(236, 72, 153, 0.1);
+  color: #DB2777;
+}
+.badge-shopping {
+  background: rgba(249, 115, 22, 0.1);
+  color: #EA580C;
+}
+
+/* ====== 行程项操作按钮 ====== */
+.ws-item-btn.move {
+  color: #94A3B8;
+  font-size: 14px;
+  padding: 2px 6px;
+}
+.ws-item-btn.move:hover:not(:disabled) {
+  color: #3385FF;
+  background: rgba(51, 133, 255, 0.06);
+}
+.ws-item-btn.move:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.ws-item-btn.delete {
+  color: #94A3B8;
+  font-size: 16px;
+  padding: 2px 6px;
+}
+.ws-item-btn.delete:hover {
+  color: #EF4444;
+  background: rgba(239, 68, 68, 0.06);
+}
+
+/* ====== 结构化详情卡片 ====== */
+.ws-detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ws-detail-card {
+  background: #fff;
+  border: 1px solid rgba(51, 133, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.ws-detail-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #7A8FA6;
+  margin-bottom: 4px;
+}
+
+.ws-detail-card-value {
+  font-size: 13px;
+  color: #1E3A5F;
+  line-height: 1.5;
+}
+
+/* ====== 画布头部保存按钮 ====== */
+.ws-save-btn-compact {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, #3385FF 0%, #1A6FFF 100%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(51, 133, 255, 0.2);
+}
+.ws-save-btn-compact:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(51, 133, 255, 0.3);
+}
+.ws-save-btn-compact:disabled {
+  background: #93c5fd;
+  cursor: not-allowed;
+  box-shadow: none;
+}
 
 /* TransitionGroup 动画 */
 .item-list-enter-active { transition: all 0.3s ease; }
