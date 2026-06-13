@@ -30,6 +30,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -144,9 +145,25 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private GenerationResult callLlmForRefine(String token, ItineraryRequest request, String currentPlanJson,
             String userPrompt, java.util.function.Consumer<String> toolNotifier,String conversationId) {
         System.out.println(">>> callLlmForRefine 被调用了！<<<");
-
         System.out.println(">>> conversationId: " + conversationId);
         System.out.println(">>> userPrompt: " + userPrompt);
+
+        // Pre-check: if the message has NO modify keywords, treat as chat and return immediately
+        if (userPrompt != null && !userPrompt.isBlank() && !isModifyLike(userPrompt)) {
+            System.out.println(">>> NO MODIFY KEYWORDS detected, replying as chat (not modifying itinerary) <<<");
+            String chatAnswer = answerChatQuestion(userPrompt, currentPlanJson);
+            if (toolNotifier != null) {
+                sendPhaseNotification(toolNotifier, "REFINE_END", chatAnswer);
+                toolNotifier.accept("THOUGHT:" + (chatAnswer.length() > 200 ? chatAnswer.substring(0, 200) + "..." : chatAnswer));
+            }
+            try {
+                ItineraryPlan originalPlan = objectMapper.readValue(currentPlanJson, ItineraryPlan.class);
+                return new GenerationResult(originalPlan, null);
+            } catch (Exception e) {
+                return new GenerationResult(null, null);
+            }
+        }
+
         EntityTracker.ExtractedEntities entities = null;
         MemoryManager.WorkingMemory workingMemory = null;
         String contradictionWarning = null;
@@ -1122,7 +1139,6 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private ItineraryPlan runAgentLoop(String token, List<Map<String, Object>> messages, JsonNode tools,
             AmapMcpClient mcpClient, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier, GenerationStats stats) throws Exception {
-        int maxTurns = 10;
         boolean mcpUnavailable = (mcpClient == null);
         
         // 获取用户ID用于工具偏好检查
@@ -1145,8 +1161,18 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             }
         }
 
-        for (int i = 0; i < maxTurns; i++) {
-            System.out.println("Agent turn " + (i + 1));
+        int turn = 0;
+        int maxTurns = 30; // safety limit to prevent infinite loops
+        String lastToolName = "";
+        String lastToolArgs = "";
+        int consecutiveSameCalls = 0;
+        while (true) {
+            turn++;
+            if (turn > maxTurns) {
+                System.err.println("Agent loop reached max safe turns (" + maxTurns + "), stopping to prevent infinite loop");
+                throw new IntellitravelException("Agent 思考轮次过多，请稍后重试或简化您的需求");
+            }
+            System.out.println("Agent turn " + turn);
             JsonNode response = callLlmChat(messages, tools);
             accumulateUsageFromResponse(response, stats);
             stats.setExecuteCalls(stats.getExecuteCalls() + 1);
@@ -1215,6 +1241,26 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                         }
                     }
                     
+                    // Detect loop: same tool + same args 3+ times consecutively → break
+                    if (name.equals(lastToolName) && args.equals(lastToolArgs)) {
+                        consecutiveSameCalls++;
+                        if (consecutiveSameCalls >= 3) {
+                            System.err.println("Detected tool call loop: " + name + " called " + consecutiveSameCalls + " times with same args, breaking");
+                            throw new IntellitravelException("AI 陷入了重复调用的死循环（" + name + " x" + consecutiveSameCalls + "），请换个方式描述需求后重试");
+                        }
+                    } else if (name.equals(lastToolName)) {
+                        // Same tool, different args — still counts but with higher threshold
+                        consecutiveSameCalls++;
+                        if (consecutiveSameCalls >= 8) {
+                            System.err.println("Detected tool call loop: " + name + " called " + consecutiveSameCalls + " times consecutively, breaking");
+                            throw new IntellitravelException("AI 反复调用同一工具（" + name + " x" + consecutiveSameCalls + "），请换个方式描述需求后重试");
+                        }
+                    } else {
+                        consecutiveSameCalls = 0;
+                        lastToolName = name;
+                        lastToolArgs = args;
+                    }
+
                     System.out.println("Invoking tool: " + name);
                     if (toolNotifier != null) {
                         try {
@@ -1376,7 +1422,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 // Check if the output was truncated due to token limit
                 String finishReason = choices.get(0).path("finish_reason").asText("");
                 if ("length".equals(finishReason)) {
-                    System.out.println("Agent turn " + (i + 1) + " output truncated (finish_reason=length), retrying with larger max_tokens...");
+                    System.out.println("Agent turn " + turn + " output truncated (finish_reason=length), retrying with larger max_tokens...");
                     if (toolNotifier != null) {
                         toolNotifier.accept("THOUGHT:输出被截断，正在用更大上下文重新生成...");
                     }
@@ -1400,7 +1446,28 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 }
 
                 if (!finalContent.contains("final_output") && !finalContent.contains("{")) {
-                    System.out.println("Agent turn " + (i + 1) + " produced thought without final output, continuing...");
+                    // Check if LLM output tool calls as XML/invoke in content instead of tool_calls array
+                    if (finalContent.contains("<invoke") || finalContent.contains("maps_") || finalContent.contains("search_destination")) {
+                        System.out.println("Agent turn " + turn + " detected XML-style tool call in content, extracting...");
+                        if (toolNotifier != null) {
+                            toolNotifier.accept("TOOL:检测到内嵌工具调用，正在解析...");
+                        }
+                        List<Map<String, String>> xmlToolCalls = extractXmlToolCalls(finalContent);
+                        if (!xmlToolCalls.isEmpty()) {
+                            for (Map<String, String> call : xmlToolCalls) {
+                                String toolName = call.get("name");
+                                String toolArgs = call.get("args");
+                                executeXmlToolCall(mcpClient, toolName, toolArgs, messages, toolNotifier, stats);
+                            }
+                            Map<String, Object> continueMsg2 = new HashMap<>();
+                            continueMsg2.put("role", "user");
+                            continueMsg2.put("content", "工具已执行完毕，请根据工具返回的结果继续完成任务。如果所有必要信息已收集完毕，请立即用final_output标签输出完整的行程JSON。");
+                            messages.add(continueMsg2);
+                            continue;
+                        }
+                    }
+                    
+                    System.out.println("Agent turn " + turn + " produced thought without final output, continuing...");
                     if (toolNotifier != null) {
                         String thought = extractThought(finalContent);
                         if (thought == null) {
@@ -1419,7 +1486,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 try {
                     plan = parseItinerary(finalContent);
                 } catch (Exception parseErr) {
-                    System.out.println("Parse failed in agent turn " + (i + 1) + ": " + parseErr.getMessage()
+                    System.out.println("Parse failed in agent turn " + turn + ": " + parseErr.getMessage()
                             + ", retrying with streaming...");
                     messages.remove(messages.size() - 1);
                     if (toolNotifier != null) {
@@ -1438,57 +1505,6 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 return normalizePlan(plan, request, toolNotifier);
             }
         }
-        // maxTurns exhausted: force LLM to produce final answer
-        System.out.println("Max turns reached, forcing final answer via streaming...");
-        Map<String, Object> forceMsg = new HashMap<>();
-        forceMsg.put("role", "user");
-        forceMsg.put("content", "你已经完成了所有必要的查询。现在请立即输出完整的行程JSON，用final_output包裹。不要再调用任何工具，直接输出最终结果。");
-        messages.add(forceMsg);
-        if (toolNotifier != null) {
-            try {
-                toolNotifier.accept("THOUGHT:已达到最大轮次限制，正在通过流式模式强制生成最终结果...");
-            } catch (Exception ignored) {}
-        }
-        JsonNode finalResponse;
-        try {
-            finalResponse = callLlmChatStreaming(messages);
-        } catch (Exception streamingErr) {
-            System.out.println("Streaming failed at max turns, falling back to normal call: " + streamingErr.getMessage());
-            finalResponse = callLlmChat(messages, null, 16384);
-        }
-        accumulateUsageFromResponse(finalResponse, stats);
-        stats.setExecuteCalls(stats.getExecuteCalls() + 1);
-        JsonNode finalChoices = finalResponse.path("choices");
-        if (!finalChoices.isArray() || finalChoices.isEmpty()) {
-            throw new IntellitravelException("AI 认真思考了太久，暂时无法完成复杂的规划，请换个简单点的要求试试吧～");
-        }
-
-        // Check finish_reason and retry if truncated
-        String finalFinishReason = finalChoices.get(0).path("finish_reason").asText("");
-        if ("length".equals(finalFinishReason)) {
-            System.out.println("Force output truncated, retrying without max_tokens limit...");
-            if (toolNotifier != null) {
-                toolNotifier.accept("THOUGHT:最终输出被截断，尝试无上限重新生成...");
-            }
-            JsonNode retryResponse = callLlmChat(messages, null, null);
-            accumulateUsageFromResponse(retryResponse, stats);
-            stats.setExecuteCalls(stats.getExecuteCalls() + 1);
-            JsonNode retryChoices = retryResponse.path("choices");
-            if (retryChoices.isArray() && !retryChoices.isEmpty()) {
-                finalChoices = retryChoices;
-            }
-        }
-
-        String finalContent = finalChoices.get(0)
-                .path("message").path("content").asText("");
-        ItineraryPlan plan = parseItinerary(finalContent);
-        if (plan != null && plan.getDailyPlans() != null && !plan.getDailyPlans().isEmpty()) {
-            if (plan.getDestination() == null && request.getDestination() != null) {
-                plan.setDestination(request.getDestination());
-            }
-            return normalizePlan(plan, request, toolNotifier);
-        }
-        throw new IntellitravelException("AI 认真思考了太久，暂时无法完成复杂的规划，请换个简单点的要求试试吧～");
     }
 
     private boolean isCustomTool(String name) {
@@ -1672,6 +1688,114 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         }
     }
 
+    /**
+     * Quick non-AI check: does the message look like a modification request?
+     * If clearly "modify-like", skip the expensive AI classification call.
+     */
+    public boolean isModifyLike(String text) {
+        if (text == null) return false;
+        return text.contains("改成") || text.contains("换成") || text.contains("删除") ||
+                text.contains("去掉") || text.contains("增加") || text.contains("添加") ||
+                text.contains("调整") || text.contains("修改") || text.contains("替换") ||
+                text.contains("加一个") || text.contains("删掉") || text.contains("改一下") ||
+                text.contains("放到") || text.contains("挪到") || text.contains("移到") ||
+                text.contains("加入") || text.contains("新增") || text.contains("改进") ||
+                text.contains("优化") || text.contains("改一改") || text.contains("完善");
+    }
+
+    /**
+     * Use AI to quickly classify user intent: CHAT or MODIFY.
+     * Very lightweight call (max_tokens=5, temperature=0).
+     */
+    private String quickClassifyChatOrModify(String userMessage) {
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("model", llmModel);
+            body.put("temperature", 0.0);
+            body.put("max_tokens", 10);
+
+            ArrayNode msgs = body.putArray("messages");
+            ObjectNode sysMsg = objectMapper.createObjectNode();
+            sysMsg.put("role", "system");
+            sysMsg.put("content", "你是一个意图分类器。只回复一个词：CHAT 或 MODIFY。\n\nMODIFY = 用户明确要求修改现有行程表中的某个具体条目，如\"把故宫换成天坛\"、\"删掉第二天\"、\"加一个景点到行程\"、\"调整第三天的时间\"。只有用户指向了行程结构（天/条目/地点）才算MODIFY。\nCHAT = 其余一切，包括咨询推荐（\"推荐好吃的\"、\"有什么特色小吃\"）、了解攻略、闲聊。\n\n注意：\n- \"推荐\"≠MODIFY，除非说\"把XX加到行程中\"\n- \"有什么好吃的\"=CHAT\n- \"帮我加点美食\"=MODIFY（因为要求改行程）");
+            msgs.add(sysMsg);
+
+            ObjectNode userMsg = objectMapper.createObjectNode();
+            userMsg.put("role", "user");
+            userMsg.put("content", "用户消息：\"" + userMessage + "\"\n\n意图：");
+            msgs.add(userMsg);
+
+            String jsonBody = objectMapper.writeValueAsString(body);
+            String requestUrl = llmBaseUrl + llmChatPath;
+
+            String response = RestClient.create()
+                    .post()
+                    .uri(requestUrl)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .headers(h -> h.setBearerAuth(llmApiKey))
+                    .body(jsonBody)
+                    .retrieve()
+                    .body(String.class);
+
+            JsonNode root = objectMapper.readTree(response);
+            String content = root.path("choices").get(0).path("message").path("content").asText("").trim().toUpperCase();
+            if (content.contains("MODIFY")) return "MODIFY";
+            if (content.contains("CHAT")) return "CHAT";
+            // Ambiguous — safer to treat as chat to avoid unwanted modifications
+            System.out.println(">>> AI classification ambiguous: '" + content + "', defaulting to CHAT <<<");
+            return "CHAT";
+        } catch (Exception e) {
+            System.err.println("Refine intent classification failed, defaulting to CHAT: " + e.getMessage());
+            return "CHAT";
+        }
+    }
+
+    /**
+     * Generate a brief chat answer when user asks a question in the refine panel.
+     */
+    public String answerChatQuestion(String userMessage, String currentPlanJson) {
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("model", llmModel);
+            body.put("temperature", 0.7);
+            body.put("max_tokens", 512);
+
+            ArrayNode msgs = body.putArray("messages");
+            ObjectNode sysMsg = objectMapper.createObjectNode();
+            sysMsg.put("role", "system");
+            sysMsg.put("content", "你是一个智能旅行助手。用户正在查看一份旅行行程，但只是在咨询信息、征求建议或讨论行程方向，而非要求立即修改行程。\n\n"
+                    + "【当前行程上下文】\n" + currentPlanJson + "\n\n"
+                    + "请直接回答用户的问题或建议，200字以内。回答时可以参考当前行程的内容。如果用户说\"在XX的基础上改进\"，"
+                    + "请基于当前行程给出具体的改进建议，但不要直接替换行程内容。"
+                    + "回答末尾可以提醒：如需将建议应用到行程中，请明确说明具体如何修改。");
+            msgs.add(sysMsg);
+
+            ObjectNode userMsg = objectMapper.createObjectNode();
+            userMsg.put("role", "user");
+            userMsg.put("content", userMessage);
+            msgs.add(userMsg);
+
+            String jsonBody = objectMapper.writeValueAsString(body);
+            String requestUrl = llmBaseUrl + llmChatPath;
+
+            String response = RestClient.create()
+                    .post()
+                    .uri(requestUrl)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .headers(h -> h.setBearerAuth(llmApiKey))
+                    .body(jsonBody)
+                    .retrieve()
+                    .body(String.class);
+
+            JsonNode root = objectMapper.readTree(response);
+            String content = root.path("choices").get(0).path("message").path("content").asText("").trim();
+            return content.isEmpty() ? "你好！有什么旅行相关的问题我可以帮你解答？" : content;
+        } catch (Exception e) {
+            System.err.println("Chat question answer failed: " + e.getMessage());
+            return "抱歉，暂时无法回答这个问题，请稍后重试。";
+        }
+    }
+
     private String toolDisplayName(String name) {
         return switch (name) {
             case "maps_weather" -> "天气查询";
@@ -1692,6 +1816,110 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             case "search_destination_info" -> "目的地信息查询";
             default -> name;
         };
+    }
+
+    /**
+     * Extract XML-style tool calls from LLM content (when model outputs
+     * &lt;invoke name="..."&gt; instead of proper tool_calls JSON array).
+     */
+    private List<Map<String, String>> extractXmlToolCalls(String content) {
+        List<Map<String, String>> result = new ArrayList<>();
+        int pos = 0;
+        while (true) {
+            int invokeStart = content.indexOf("<invoke", pos);
+            if (invokeStart < 0) break;
+            int invokeEnd = content.indexOf("</invoke>", invokeStart);
+            if (invokeEnd < 0) break;
+            String block = content.substring(invokeStart, invokeEnd + "</invoke>".length());
+
+            // Extract tool name from <invoke name="tool_name">
+            String toolName = extractXmlAttr(block, "name");
+            if (toolName == null || toolName.isBlank()) {
+                pos = invokeEnd + 1;
+                continue;
+            }
+
+            // Extract all <parameter name="..." string="true">value</parameter>
+            Map<String, String> params = new LinkedHashMap<>();
+            int paramPos = 0;
+            while (true) {
+                int pStart = block.indexOf("<parameter", paramPos);
+                if (pStart < 0) break;
+                int pEnd = block.indexOf("</parameter>", pStart);
+                if (pEnd < 0) break;
+                String pBlock = block.substring(pStart, pEnd + "</parameter>".length());
+                String pName = extractXmlAttr(pBlock, "name");
+                String pValue = block.substring(block.indexOf(">", pStart) + 1, pEnd).trim();
+                if (pName != null && !pName.isBlank()) {
+                    params.put(pName, pValue);
+                }
+                paramPos = pEnd + 1;
+            }
+
+            if (!params.isEmpty()) {
+                Map<String, String> call = new LinkedHashMap<>();
+                call.put("name", toolName);
+                try {
+                    call.put("args", objectMapper.writeValueAsString(params));
+                } catch (Exception e) {
+                    call.put("args", "{}");
+                }
+                result.add(call);
+            }
+
+            pos = invokeEnd + 1;
+        }
+        return result;
+    }
+
+    private String extractXmlAttr(String xml, String attrName) {
+        int idx = xml.indexOf(attrName + "=\"");
+        if (idx < 0) return null;
+        int start = idx + attrName.length() + 2;
+        int end = xml.indexOf("\"", start);
+        if (end < 0) return null;
+        return xml.substring(start, end);
+    }
+
+    /**
+     * Execute a tool call extracted from XML content.
+     */
+    private void executeXmlToolCall(AmapMcpClient mcpClient, String toolName, String toolArgs,
+            List<Map<String, Object>> messages,
+            java.util.function.Consumer<String> toolNotifier,
+            GenerationStats stats) {
+        try {
+            Map<String, Object> assistantMsg = new LinkedHashMap<>();
+            assistantMsg.put("role", "assistant");
+            assistantMsg.put("content", "调用工具: " + toolName);
+            messages.add(assistantMsg);
+
+            if (toolNotifier != null) {
+                toolNotifier.accept("TOOL:调用" + toolDisplayName(toolName));
+            }
+
+            String result = mcpClient.callTool(toolName, toolArgs);
+
+            stats.getToolCalls().add(new GenerationStats.ToolCallRecord(
+                    toolName,
+                    toolDisplayName(toolName),
+                    result != null && result.startsWith("Error") ? "failed" : "success"));
+
+            Map<String, Object> toolMsg = new LinkedHashMap<>();
+            toolMsg.put("role", "tool");
+            toolMsg.put("tool_call_id", "xml-" + stats.getToolCalls().size());
+            toolMsg.put("name", toolName);
+            toolMsg.put("content", result);
+            messages.add(toolMsg);
+        } catch (Exception e) {
+            System.err.println("XML tool call failed for " + toolName + ": " + e.getMessage());
+            Map<String, Object> toolMsg = new LinkedHashMap<>();
+            toolMsg.put("role", "tool");
+            toolMsg.put("tool_call_id", "xml-" + stats.getToolCalls().size());
+            toolMsg.put("name", toolName);
+            toolMsg.put("content", "Error: " + e.getMessage());
+            messages.add(toolMsg);
+        }
     }
 
     private String stripCodeFence(String text) {
@@ -1763,6 +1991,15 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
         if (firstBrace >= 0 && lastBrace >= 0 && lastBrace > firstBrace) {
             jsonToParse = cleaned.substring(firstBrace, lastBrace + 1);
+        }
+
+        // Safety: strip leading markdown / non-JSON content (e.g. "#", XML, text)
+        jsonToParse = jsonToParse.trim();
+        if (!jsonToParse.startsWith("{")) {
+            int braceIdx = jsonToParse.indexOf("{");
+            if (braceIdx >= 0) {
+                jsonToParse = jsonToParse.substring(braceIdx);
+            }
         }
 
         jsonToParse = fixJsonIssues(jsonToParse);

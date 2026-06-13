@@ -1,5 +1,6 @@
 package com.travel.intellitravel_pioneer.service.serviceImpl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travel.intellitravel_pioneer.exception.IntellitravelException;
 import com.travel.intellitravel_pioneer.po.ItineraryPO;
@@ -69,6 +70,31 @@ public class ItineraryServiceImpl implements ItineraryService {
             ctx = createConversation(token, request, true);
         }
         java.util.function.Consumer<String> wrappedNotifier = buildNotifier(ctx, toolNotifier);
+
+        // Chat intercept: non-modify messages handled without Agent Loop
+        if (!tripPlanningAiClient.isModifyLike(userPrompt)) {
+            System.out.println(">>> [ItineraryServiceImpl] Chat detected, skipping modify flow <<<");
+            String planJson;
+            try {
+                planJson = objectMapper.writeValueAsString(currentPlan);
+            } catch (JsonProcessingException e) {
+                planJson = "{}";
+            }
+            String chatAnswer = tripPlanningAiClient.answerChatQuestion(userPrompt, planJson);
+            if (ctx.conversationId != null) {
+                try {
+                    conversationService.addMessage(token, ctx.conversationId,
+                            AgentMessageCreateRequest.builder()
+                                    .role("assistant")
+                                    .content(chatAnswer)
+                                    .build());
+                } catch (Exception ignored) {}
+            }
+            if (toolNotifier != null) {
+                toolNotifier.accept("THOUGHT:" + (chatAnswer.length() > 200 ? chatAnswer.substring(0, 200) + "..." : chatAnswer));
+            }
+            return new GenerationResult(currentPlan, null);
+        }
 
         try {
             GenerationResult result = tripPlanningAiClient.modifyItineraryWithStats(
@@ -271,10 +297,13 @@ public class ItineraryServiceImpl implements ItineraryService {
         StringBuilder sb = new StringBuilder();
         if (isModify) {
             if (userPrompt != null && !userPrompt.isBlank()) {
-                sb.append("请帮我修改行程方案：\n").append(userPrompt).append("\n\n");
+                sb.append(userPrompt).append("\n\n");
             } else {
                 sb.append("请帮我修改已有的行程方案。\n");
             }
+            // For modify, the current itinerary JSON is sent in a separate message,
+            // so we skip the structured fields (destination/days/budget) to keep it clean.
+            return sb.toString().trim();
         } else {
             sb.append("请帮我规划旅行方案。\n");
         }

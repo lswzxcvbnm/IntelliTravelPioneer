@@ -24,4 +24,21 @@ public interface TripPlanningAiClient {
         ItineraryPlan plan = modifyItinerary(token, request, currentPlan, userPrompt ,conversationId);
         return new GenerationResult(plan, null);
     }
+
+    /** Check if message contains explicit modify keywords (改成/换成/删除/改进 etc.) */
+    default boolean isModifyLike(String text) {
+        if (text == null) return false;
+        return text.contains("改成") || text.contains("换成") || text.contains("删除") ||
+                text.contains("去掉") || text.contains("增加") || text.contains("添加") ||
+                text.contains("调整") || text.contains("修改") || text.contains("替换") ||
+                text.contains("加一个") || text.contains("删掉") || text.contains("改一下") ||
+                text.contains("放到") || text.contains("挪到") || text.contains("移到") ||
+                text.contains("加入") || text.contains("新增") || text.contains("改进") ||
+                text.contains("优化") || text.contains("改一改") || text.contains("完善");
+    }
+
+    /** Generate a brief chat answer for non-modify questions in refine panel */
+    default String answerChatQuestion(String userMessage, String currentPlanJson) {
+        return "如需修改行程，请明确说明如何调整（如\"把第一天换成室内景点\"）。";
+    }
 }
