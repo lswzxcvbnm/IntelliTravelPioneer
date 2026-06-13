@@ -2,7 +2,7 @@
   <div class="customize-shell">
     <div class="customize-main" :class="{ 'with-panel': !agentPanelCollapsed }">
       <header class="top-bar">
-        <button type="button" class="back-btn" @click="goBack">← 返回</button>
+        <BackButton class="back-btn">← 返回</BackButton>
         <h1>{{ isEditMode ? '编辑行程计划' : '创建行程计划' }}</h1>
         <div class="top-bar-right">
           <button v-if="editablePlan" type="button"
@@ -293,15 +293,15 @@ import {
 } from '../../api/itinerary'
 import type { ItineraryPlan, ItineraryRequest, PhaseData, GenerationStats } from '../../api/itinerary'
 import { linkItinerary, getConversationByItineraryId, getConversationDetail, type AgentMessageVO } from '../../api/conversation'
-import { goBackByAppRule } from '../../composables/useBackHandler'
 import { listMySkills, type SkillVO } from '../../api/skill'
 import { streamChat, type ChatMessage } from '../../api/chat'
+import { getToolLogMessage, extractToolNameFromLog, getToolIconFromLog } from '../../constants/tool'
+import BackButton from '../../components/BackButton.vue'
 import AgentPanel from './AgentPanel.vue'
 import './agent-panel-styles.css'
 
 const router = useRouter()
 const route = useRoute()
-const goBack = () => goBackByAppRule(router)
 
 interface LogEntry {
   type: 'phase' | 'thought' | 'tool'
@@ -503,36 +503,19 @@ watch(currentAgentPhase, (newPhase, oldPhase) => {
   }
 })
 
-const toolNameMapping: Record<string, string> = {
-  maps_direction_bicycling: '正在规划骑行路线...',
-  maps_direction_driving: '正在规划驾车路线...',
-  maps_direction_transit_integrated: '正在规划公共交通路线...',
-  maps_direction_walking: '正在规划步行路线...',
-  maps_distance: '正在测量距离...',
-  maps_geo: '正在解析地址坐标...',
-  maps_regeocode: '正在获取地址信息...',
-  maps_ip_location: '正在进行定位...',
-  maps_schema_personal_map: '正在生成地图展示链接...',
-  maps_around_search: '正在搜索周边信息...',
-  maps_search_detail: '正在查询地点详情...',
-  maps_text_search: '正在搜索相关地点...',
-  maps_schema_navi: '正在生成导航链接...',
-  maps_schema_take_taxi: '正在生成打车链接...',
-  maps_weather: '正在查询天气情况...',
-  search_destination_info: '正在查询目的地旅行信息...'
-}
+
 
 const getLogMessage = (msg: string) => {
   const invokeMatch = msg.match(/Invoking tool: (\w+)/)
   if (invokeMatch && invokeMatch[1]) {
-    return toolNameMapping[invokeMatch[1]] || msg
+    return getToolLogMessage(invokeMatch[1]) || msg
   }
   const completeMatch = msg.match(/Tool (\w+) completed/)
   if (completeMatch && completeMatch[1]) {
-    const name = toolNameMapping[completeMatch[1]]
+    const name = getToolLogMessage(completeMatch[1])
     if (name) return name.replace('正在', '已完成').replace('...', '。')
   }
-  return toolNameMapping[msg] || msg
+  return getToolLogMessage(msg) || msg
 }
 
 // ===== 分组显示 =====
@@ -546,40 +529,7 @@ const manuallyToggledThoughts = ref<Set<number>>(new Set())
 
 
 
-const getToolIcon = (message: string): string => {
-  if (message.includes('weather')) return '🌤️'
-  if (message.includes('search') || message.includes('Search')) return '🔍'
-  if (message.includes('direction') || message.includes('路线')) return '🗺️'
-  if (message.includes('distance')) return '📏'
-  if (message.includes('schema') || message.includes('地图')) return '🗺️'
-  if (message.includes('info') || message.includes('destination')) return 'ℹ️'
-  return '🔧'
-}
 
-const extractToolName = (message: string): string => {
-  const match = message.match(/Invoking tool: (\w+)/)
-  if (match && match[1]) {
-    const nameMap: Record<string, string> = {
-      maps_weather: '天气查询',
-      maps_text_search: '地点搜索',
-      maps_around_search: '周边搜索',
-      maps_search_detail: '地点详情',
-      maps_direction_driving: '驾车路线',
-      maps_direction_walking: '步行路线',
-      maps_direction_bicycling: '骑行路线',
-      maps_direction_transit_integrated: '公交路线',
-      maps_distance: '距离测量',
-      maps_geo: '坐标解析',
-      maps_regeocode: '地址解析',
-      maps_schema_personal_map: '地图展示',
-      maps_schema_navi: '导航链接',
-      maps_schema_take_taxi: '打车链接',
-      search_destination_info: '目的地信息'
-    }
-    return nameMap[match[1]] || match[1]
-  }
-  return message.substring(0, 30) + (message.length > 30 ? '...' : '')
-}
 
 
 

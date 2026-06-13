@@ -9,6 +9,7 @@ import {
     type AgentMessageVO,
     type ConversationDetailVO
 } from '../../api/conversation'
+import { getToolDisplayName, getToolIcon } from '../../constants/tool'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,44 +25,7 @@ const showSystemMessages = ref(true)
 const editDialogVisible = ref(false)
 const editForm = ref({ title: '', tags: '', description: '' })
 
-// 工具名中文映射（与 AgentPanel / BattleCustomizePlan 保持一致）
-const toolNameMap: Record<string, string> = {
-    maps_weather: '天气查询',
-    maps_text_search: '地点搜索',
-    maps_around_search: '周边搜索',
-    maps_search_detail: '地点详情查询',
-    maps_direction_driving: '驾车路线规划',
-    maps_direction_walking: '步行路线规划',
-    maps_direction_bicycling: '骑行路线规划',
-    maps_direction_transit_integrated: '公共交通路线规划',
-    maps_distance: '测距',
-    maps_geo: '坐标解析',
-    maps_regeocode: '地址解析',
-    maps_ip_location: 'IP定位',
-    maps_schema_personal_map: '地图展示',
-    maps_schema_navi: '导航链接',
-    maps_schema_take_taxi: '打车链接',
-    search_destination_info: '目的地信息查询',
-}
 
-const toolIconMap: Record<string, string> = {
-    maps_weather: '🌤️',
-    maps_text_search: '🔍',
-    maps_around_search: '📍',
-    maps_search_detail: '📋',
-    maps_direction_driving: '🚗',
-    maps_direction_walking: '🚶',
-    maps_direction_bicycling: '🚲',
-    maps_direction_transit_integrated: '🚌',
-    maps_distance: '📏',
-    maps_geo: '🗺',
-    maps_regeocode: '🏠',
-    maps_ip_location: '🌐',
-    maps_schema_personal_map: '🗺️',
-    maps_schema_navi: '🧭',
-    maps_schema_take_taxi: '🚕',
-    search_destination_info: '📚',
-}
 
 const typeIconMap: Record<string, string> = {
     '景点': '🏛',
@@ -155,8 +119,8 @@ function parseStructuredToolCalls(toolCallsStr: string | null): Array<{name: str
     if (!Array.isArray(data)) return null
     return data.map((tc: any) => {
         const rawName = tc.name || tc.function?.name || ''
-        const displayName = toolNameMap[rawName] || rawName
-        const icon = toolIconMap[rawName] || '🔧'
+        const displayName = getToolDisplayName(rawName)
+        const icon = getToolIcon(rawName)
         // 从参数中提取关键信息
         let argsSummary = ''
         let argsObj: any = tc.arguments || tc.function?.arguments || {}
@@ -208,9 +172,9 @@ function parseItineraryData(toolCallsStr: string | null): { title: string; days:
 
 function goToItinerary() {
     if (conversation.value?.itineraryId) {
-        router.push(`/battle/create?itineraryId=${conversation.value.itineraryId}&convId=${conversationId}`)
+        router.push(`/workspace?itineraryId=${conversation.value.itineraryId}&convId=${conversationId}`)
     } else {
-        router.push('/battle/create')
+        router.push('/workspace')
     }
 }
 
@@ -224,7 +188,7 @@ function continueInWorkspace() {
 }
 
 function goNewPlan() {
-    router.push('/battle/create')
+    router.push('/workspace')
 }
 
 function openEditDialog() {

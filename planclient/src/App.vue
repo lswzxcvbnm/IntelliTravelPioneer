@@ -13,7 +13,7 @@ const isAuthPage = computed(() =>
   route.path === '/login' || route.path === '/register'
 )
 
-const isBattleCreate = computed(() => route.path === '/battle/create')
+const isBattleCreate = computed(() => route.path === '/workspace')
 
 const navItems = [
   { path: '/dashboard', label: '首页', icon: '🏠' },
@@ -29,7 +29,7 @@ const goCreate = () => {
     router.push('/login')
     return
   }
-  router.push('/battle/create')
+  router.push('/workspace')
 }
 
 const handleLogout = () => {

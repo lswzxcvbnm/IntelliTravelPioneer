@@ -48,8 +48,7 @@ const router = createRouter({
     },
     {
       path: '/battle/create',
-      name: 'BattleCustomizePlan',
-      component: BattleCustomizePlan
+      redirect: '/workspace'
     },
     {
       path: '/tools',

@@ -25,6 +25,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { TOOL_NAME_MAP, TOOL_ICON_MAP, getToolDisplayName, getToolIcon } from '../../constants/tool'
 
 interface ToolCall {
   name: string
@@ -40,43 +41,7 @@ const props = defineProps<{
 
 const isExpanded = ref(false)
 
-const toolNameMap: Record<string, string> = {
-  maps_weather: '天气查询',
-  maps_text_search: '地点搜索',
-  maps_around_search: '周边搜索',
-  maps_search_detail: '地点详情查询',
-  maps_direction_driving: '驾车路线规划',
-  maps_direction_walking: '步行路线规划',
-  maps_direction_bicycling: '骑行路线规划',
-  maps_direction_transit_integrated: '公共交通路线规划',
-  maps_distance: '测距',
-  maps_geo: '坐标解析',
-  maps_regeocode: '地址解析',
-  maps_ip_location: 'IP定位',
-  maps_schema_personal_map: '地图展示',
-  maps_schema_navi: '导航链接',
-  maps_schema_take_taxi: '打车链接',
-  search_destination_info: '目的地信息查询',
-}
 
-const toolIconMap: Record<string, string> = {
-  maps_weather: '🌤️',
-  maps_text_search: '🔍',
-  maps_around_search: '📍',
-  maps_search_detail: '📋',
-  maps_direction_driving: '🚗',
-  maps_direction_walking: '🚶',
-  maps_direction_bicycling: '🚲',
-  maps_direction_transit_integrated: '🚌',
-  maps_distance: '📏',
-  maps_geo: '🗺',
-  maps_regeocode: '🏠',
-  maps_ip_location: '🌐',
-  maps_schema_personal_map: '🗺️',
-  maps_schema_navi: '🧭',
-  maps_schema_take_taxi: '🚕',
-  search_destination_info: '📚',
-}
 
 const parsedCalls = computed<ToolCall[]>(() => {
   try {
@@ -86,8 +51,8 @@ const parsedCalls = computed<ToolCall[]>(() => {
       const rawName = tc.name || tc.function?.name || ''
       return {
         name: rawName,
-        displayName: toolNameMap[rawName] || rawName,
-        icon: toolIconMap[rawName] || '🔧',
+        displayName: getToolDisplayName(rawName),
+        icon: getToolIcon(rawName),
         status: tc.status || 'success',
         args: formatArgs(tc.arguments || tc.function?.arguments)
       }

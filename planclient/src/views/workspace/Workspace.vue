@@ -2,9 +2,12 @@
   <div class="workspace">
     <!-- 顶部导航栏 -->
     <header class="ws-header">
-      <button class="ws-back-btn" @click="goBack">← 返回</button>
+      <BackButton class="ws-back-btn">← 返回</BackButton>
       <h2 class="ws-header-title">{{ editablePlan?.title || pageTitle }}</h2>
       <div class="ws-header-actions">
+        <button class="ws-action-btn" :class="{ active: !agentPanelCollapsed }" @click="agentPanelCollapsed = !agentPanelCollapsed">
+          AI
+        </button>
         <button v-if="editablePlan" class="ws-action-btn" @click="handleSave" :disabled="isSaving">
           {{ isSaving ? '保存中...' : '保存' }}
         </button>
@@ -124,6 +127,7 @@
           <FormInput
             v-if="inputMode === 'form' && !editablePlan"
             :isGenerating="isGenerating"
+            :skills="mySkills"
             @submit="handleFormSubmit"
             @switchMode="inputMode = $event"
           />
@@ -194,7 +198,7 @@
                   :class="['type-' + getTypeClass(item.type), { expanded: isItemExpanded(day.dayNumber, ii) }]"
                 >
                   <div class="ws-item-header" @click="toggleItemExpand(day.dayNumber, ii)">
-                    <span class="ws-item-icon">{{ typeIconMap[item.type] || '📍' }}</span>
+                    <span class="ws-item-icon">{{ TYPE_ICON_MAP[item.type] || '📍' }}</span>
                     <span class="ws-item-name">{{ item.name || '未命名' }}</span>
                     <span class="ws-item-expand-arrow">{{ isItemExpanded(day.dayNumber, ii) ? '▲' : '▼' }}</span>
                     <div class="ws-item-actions">
@@ -248,6 +252,26 @@
           </template>
         </div>
       </aside>
+
+      <!-- AgentPanel -->
+      <AgentPanel
+        v-if="!agentPanelCollapsed"
+        :collapsed="agentPanelCollapsed"
+        :is-generating="isAgentGenerating"
+        :is-done="isAgentDone"
+        :is-loading="isAgentLoading"
+        :current-action="currentAction"
+        :logs="agentLogs"
+        :total-days="editablePlan?.totalDays"
+        :route-count="totalItems"
+        :budget="editablePlan?.estimatedCost"
+        :token-stats="agentTokenStats"
+        :tool-stats="agentToolStats"
+        :execution-logs="agentExecutionLogs"
+        :show-logs="showAgentLogs"
+        @toggle-logs="showAgentLogs = !showAgentLogs"
+        @toggle-collapse="agentPanelCollapsed = !agentPanelCollapsed"
+      />
     </div>
   </div>
 </template>
@@ -259,17 +283,20 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { generateItineraryStream, modifyItineraryStream, saveItinerary, updateItinerary } from '../../api/itinerary'
 import type { ItineraryRequest, ItineraryPlan, GenerationStats } from '../../api/itinerary'
 import { linkItinerary } from '../../api/conversation'
-import { goBackByAppRule } from '../../composables/useBackHandler'
+import { listMySkills, type SkillVO } from '../../api/skill'
 import { useConversation } from '../../composables/useConversation'
 import { useItinerary } from '../../composables/useItinerary'
 import { useDragDrop } from '../../composables/useDragDrop'
+import BackButton from '../../components/BackButton.vue'
+import { extractActionFromLog, TYPE_ICON_MAP } from '../../constants/tool'
 import ToolCallCard from './ToolCallCard.vue'
 import ChatInput from './ChatInput.vue'
 import FormInput from './FormInput.vue'
+import AgentPanel from '../battle/AgentPanel.vue'
+import '../battle/agent-panel-styles.css'
 
 const router = useRouter()
 const route = useRoute()
-const goBack = () => goBackByAppRule(router)
 
 // ===== 初始化 composables =====
 const {
@@ -308,6 +335,16 @@ const currentPhase = ref('')
 const liveLogs = ref<Array<{ type: string; icon: string; text: string }>>([])
 const activeStats = ref<GenerationStats | null>(null)
 
+// ===== AgentPanel 状态 =====
+const agentPanelCollapsed = ref(false)
+const showAgentLogs = ref(false)
+const agentLogs = ref<Array<{ type: 'phase' | 'thought' | 'tool'; message: string; phaseType?: string }>>([])
+const generationStats = ref<GenerationStats | null>(null)
+const refineStats = ref<GenerationStats | null>(null)
+
+// ===== 技能状态 =====
+const mySkills = ref<SkillVO[]>([])
+
 // ===== 输入模式（表单 / 对话） =====
 // 如果是延续对话（有 convId），默认使用对话模式
 const inputMode = ref<'form' | 'chat'>(route.query.convId ? 'chat' : 'form')
@@ -321,6 +358,88 @@ const inputModes = [
 const inputPlaceholder = computed(() =>
   editablePlan.value ? '描述你想如何修改行程...' : '描述你的旅行目的地和需求...'
 )
+
+// ===== AgentPanel 计算属性 =====
+const isAgentGenerating = computed(() => isGenerating.value || isRefining.value)
+const isAgentDone = computed(() => !!editablePlan.value && !isRefining.value)
+const isAgentLoading = computed(() => agentLogs.value.length === 0 && isAgentGenerating.value)
+
+const agentTokenStats = computed(() => {
+  const stats = generationStats.value || refineStats.value
+  if (!stats) return undefined
+  return {
+    promptTokens: stats.totalPromptTokens,
+    completionTokens: stats.totalCompletionTokens,
+    totalTokens: stats.totalTokens,
+    apiCalls: stats.planCalls + stats.executeCalls + stats.verifyCalls
+  }
+})
+
+const agentToolStats = computed(() => {
+  const stats = generationStats.value || refineStats.value
+  if (!stats?.toolCalls) return undefined
+  const grouped = new Map<string, { name: string; displayName: string; count: number; successCount: number }>()
+  for (const tc of stats.toolCalls) {
+    const key = tc.displayName || tc.name
+    if (!grouped.has(key)) {
+      grouped.set(key, { name: key, displayName: key, count: 0, successCount: 0 })
+    }
+    const entry = grouped.get(key)!
+    entry.count++
+    if (tc.status === 'success') entry.successCount++
+  }
+  return Array.from(grouped.values()).map(entry => ({
+    ...entry,
+    status: entry.successCount > 0 ? 'success' as const : 'skipped' as const
+  }))
+})
+
+const agentExecutionLogs = computed(() => {
+  if (!agentLogs.value || agentLogs.value.length === 0) return undefined
+  return agentLogs.value
+    .filter(entry => !isEmptyEntry(entry))
+    .map(entry => {
+      if (entry.type === 'phase') {
+        return {
+          type: 'phase',
+          icon: entry.phaseType?.endsWith('_END') ? '✓' : '›',
+          text: entry.message
+        }
+      } else if (entry.type === 'thought') {
+        return {
+          type: 'thought',
+          icon: '💡',
+          text: truncateText(entry.message, 120)
+        }
+      } else if (entry.type === 'tool') {
+        return {
+          type: 'tool',
+          icon: '🔧',
+          text: entry.message
+        }
+      }
+      return { type: 'unknown', icon: '', text: entry.message }
+    })
+})
+
+const isEmptyEntry = (entry: { type: string; message: string }): boolean => {
+  if (!entry.message) return true
+  const trimmed = entry.message.trim()
+  if (trimmed.length === 0) return true
+  if (trimmed === 'THOUGHT:') return true
+  if (trimmed.startsWith('THOUGHT:') && trimmed.replace('THOUGHT:', '').trim().length === 0) return true
+  return false
+}
+
+const truncateText = (text: string, maxLength: number): string => {
+  if (!text) return ''
+  let msg = text
+  if (msg.startsWith('THOUGHT:')) {
+    msg = msg.replace('THOUGHT:', '').trim()
+  }
+  if (msg.length <= maxLength) return msg
+  return msg.substring(0, maxLength) + '...'
+}
 
 // ===== 工具调用解析 =====
 function parseToolType(toolCallsStr: string | null): 'itinerary' | 'tools' | null {
@@ -411,6 +530,7 @@ async function handleFormSubmit(request: {
   budgetLevel: string
   interests: string[]
   additionalNotes: string
+  skillIds?: string[]
 }) {
   if (!request.destination || isGenerating.value) return
 
@@ -429,7 +549,9 @@ async function handleFormSubmit(request: {
 
   isGenerating.value = true
   liveLogs.value = []
+  agentLogs.value = []
   currentPhase.value = ''
+  generationStats.value = null
 
   try {
     await generateItineraryStream(
@@ -455,6 +577,7 @@ async function handleFormSubmit(request: {
       },
       (stats) => {
         activeStats.value = stats
+        generationStats.value = stats
         if (stats.toolCalls?.length) {
           updateMessage(assistMsgId, { toolCalls: JSON.stringify(stats.toolCalls) })
         }
@@ -474,7 +597,9 @@ async function handleFormSubmit(request: {
 async function runGenerate(msgId: string, userPrompt: string) {
   isGenerating.value = true
   liveLogs.value = []
+  agentLogs.value = []
   currentPhase.value = ''
+  generationStats.value = null
 
   try {
     const request = parseUserRequest(userPrompt)
@@ -501,6 +626,10 @@ async function runGenerate(msgId: string, userPrompt: string) {
       },
       (stats) => {
         activeStats.value = stats
+        generationStats.value = stats
+        if (stats.toolCalls?.length) {
+          updateMessage(msgId, { toolCalls: JSON.stringify(stats.toolCalls) })
+        }
       },
       (cid) => { convId.value = cid }
     )
@@ -516,6 +645,8 @@ async function runGenerate(msgId: string, userPrompt: string) {
 async function runRefine(msgId: string, userPrompt: string) {
   isRefining.value = true
   liveLogs.value = []
+  agentLogs.value = []
+  refineStats.value = null
 
   try {
     const originalPlan = { ...editablePlan.value } as ItineraryPlan
@@ -545,6 +676,10 @@ async function runRefine(msgId: string, userPrompt: string) {
       },
       (stats) => {
         activeStats.value = stats
+        refineStats.value = stats
+        if (stats.toolCalls?.length) {
+          updateMessage(msgId, { toolCalls: JSON.stringify(stats.toolCalls) })
+        }
       },
       (cid) => { convId.value = cid }
     )
@@ -560,6 +695,8 @@ async function runRefine(msgId: string, userPrompt: string) {
 // ===== 辅助方法 =====
 function addLog(type: string, icon: string, text: string) {
   liveLogs.value.push({ type, icon, text: text.slice(0, 200) })
+  // 同时推送到 AgentPanel 日志
+  agentLogs.value.push({ type: type as 'phase' | 'thought' | 'tool', message: text.slice(0, 200) })
 }
 
 /** 自动保存行程并关联到对话 */
@@ -605,65 +742,12 @@ async function autoSaveAndLinkItinerary() {
   }
 }
 
-function extractActionFromLog(msg: string): string {
-  const invokeMatch = msg.match(/Invoking tool: (\w+)/)
-  if (invokeMatch && invokeMatch[1]) {
-    const nameMap: Record<string, string> = {
-      maps_direction_bicycling: '正在规划骑行路线...',
-      maps_direction_driving: '正在规划驾车路线...',
-      maps_direction_transit_integrated: '正在规划公交交通路线...',
-      maps_direction_walking: '正在规划步行路线...',
-      maps_distance: '正在测量距离...',
-      maps_geo: '正在解析坐标...',
-      maps_regeocode: '正在获取地址信息...',
-      maps_ip_location: '正在进行定位...',
-      maps_schema_personal_map: '正在生成地图展示链接...',
-      maps_around_search: '正在搜索周边信息...',
-      maps_search_detail: '正在查询地点详情...',
-      maps_text_search: '正在搜索相关地点...',
-      maps_schema_navi: '正在生成导航链接...',
-      maps_schema_take_taxi: '正在生成打车链接...',
-      maps_weather: '正在查询天气情况...',
-      search_destination_info: '正在查询目的地旅行信息...',
-    }
-    return nameMap[invokeMatch[1]] || msg
-  }
-  const completeMatch = msg.match(/Tool (\w+) completed/)
-  if (completeMatch && completeMatch[1]) {
-    const nameMap: Record<string, string> = {
-      maps_weather: '天气查询',
-      maps_text_search: '地点搜索',
-      maps_around_search: '周边搜索',
-      maps_search_detail: '地点详情',
-      maps_direction_driving: '驾车路线',
-      maps_direction_walking: '步行路线',
-      maps_direction_bicycling: '骑行路线',
-      maps_direction_transit_integrated: '公交路线',
-      maps_distance: '距离测量',
-      maps_geo: '坐标解析',
-      maps_regeocode: '地址解析',
-      maps_schema_personal_map: '地图展示',
-      maps_schema_navi: '导航链接',
-      maps_schema_take_taxi: '打车链接',
-      search_destination_info: '目的地信息',
-    }
-    const name = nameMap[completeMatch[1]]
-    if (name) return name.replace('正在', '已完成').replace('...', '。')
-  }
-  return msg.slice(0, 50) + (msg.length > 50 ? '...' : '')
-}
+
 
 // ===== 本地 UI 辅助 =====
 const expandedItems = ref<Set<string>>(new Set())
 
-const typeIconMap: Record<string, string> = {
-  '景点': '📍',
-  '餐饮': '🍜',
-  '交通': '🚗',
-  '住宿': '🏨',
-  '休闲': '🎭',
-  '购物': '🛍️',
-}
+
 
 function isItemExpanded(dayNum: number, idx: number): boolean {
   return expandedItems.value.has(`${dayNum}-${idx}`)
@@ -725,6 +809,14 @@ async function handleSave() {
   }
 }
 
+// ===== 获取技能列表 =====
+async function fetchMySkills() {
+  try {
+    const r = await listMySkills()
+    mySkills.value = (r as any).data || []
+  } catch { /* ignore */ }
+}
+
 // ===== 生命周期 =====
 onMounted(async () => {
   const queryConvId = route.query.convId ? String(route.query.convId) : null
@@ -756,6 +848,9 @@ onMounted(async () => {
     console.log('[Workspace] switching to chat mode, editablePlan:', !!editablePlan.value, 'messages:', messages.value.length)
     inputMode.value = 'chat'
   }
+
+  // 获取技能列表
+  fetchMySkills()
 })
 
 // 退出工作台页面时自动保存行程并关联到对话

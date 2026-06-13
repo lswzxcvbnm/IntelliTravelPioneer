@@ -165,8 +165,8 @@ const refreshList = async () => {
   }
 }
 
-const goCreate = () => router.push('/battle/create')
-const goEdit = (id: string) => router.push({ path: '/battle/create', query: { itineraryId: id } })
+const goCreate = () => router.push('/workspace')
+const goEdit = (id: string) => router.push({ path: '/workspace', query: { itineraryId: id } })
 
 const openDeleteModal = (item: ItineraryVO) => { deletingItem.value = item; showDeleteModal.value = true }
 const closeDeleteModal = () => { if (!isDeleting.value) { showDeleteModal.value = false; deletingItem.value = null } }

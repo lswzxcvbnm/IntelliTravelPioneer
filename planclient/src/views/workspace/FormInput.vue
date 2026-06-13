@@ -46,6 +46,13 @@
           </div>
         </div>
 
+        <div v-if="skills.length > 0" class="ws-form-row ws-form-skills-row">
+          <span class="ws-label-sm ws-label-inline">技能</span>
+          <div class="ws-chips-compact">
+            <button v-for="skill in skills" :key="skill.id" class="ws-chip-c ws-chip-skill" :class="{ active: skillIds.includes(skill.id) }" @click="toggleSkill(skill.id)">{{ skill.name }}</button>
+          </div>
+        </div>
+
         <div class="ws-form-row ws-form-action-row">
           <label class="ws-field-notes">
             <textarea v-model.trim="notes" class="ws-input-notes" rows="1" placeholder="补充说明（选填）..."></textarea>
@@ -61,15 +68,21 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 
+interface SkillVO {
+  id: string
+  name: string
+}
+
 interface FormRequest {
   destination: string
   days: number
   budgetLevel: string
   interests: string[]
   additionalNotes: string
+  skillIds?: string[]
 }
 
-const props = defineProps<{ isGenerating?: boolean }>()
+const props = defineProps<{ isGenerating?: boolean; skills?: SkillVO[] }>()
 
 const emit = defineEmits<{
   submit: [request: FormRequest]
@@ -81,6 +94,7 @@ const destination = ref('')
 const days = ref(3)
 const budgetLevel = ref('medium')
 const interests = ref<string[]>([])
+const skillIds = ref<string[]>([])
 const notes = ref('')
 
 const budgetOptions = [
@@ -108,6 +122,12 @@ function toggleInterest(value: string) {
   else interests.value.push(value)
 }
 
+function toggleSkill(skillId: string) {
+  const idx = skillIds.value.indexOf(skillId)
+  if (idx >= 0) skillIds.value.splice(idx, 1)
+  else skillIds.value.push(skillId)
+}
+
 function handleSubmit() {
   if (!destination.value.trim() || props.isGenerating) return
   emit('submit', {
@@ -116,6 +136,7 @@ function handleSubmit() {
     budgetLevel: budgetLevel.value,
     interests: [...interests.value],
     additionalNotes: notes.value.trim(),
+    skillIds: [...skillIds.value],
   })
   isCollapsed.value = true
 }
@@ -160,10 +181,13 @@ function handleSubmit() {
 .ws-seg-item-c.active { background: linear-gradient(135deg, rgba(51, 133, 255, 0.1), rgba(26, 111, 255, 0.06)); color: #1A6FFF; font-weight: 700; }
 .ws-seg-item-c:hover:not(.active) { background: #EAF0F8; color: #4A72BA; }
 .ws-form-interests-row { gap: 10px; align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+.ws-form-skills-row { gap: 10px; align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
 .ws-chips-compact { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
 .ws-chip-c { padding: 5px 12px; border: 1.5px solid #DDE6F0; border-radius: 20px; background: #F8FBFF; color: #6B8CBE; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.16s ease; white-space: nowrap; }
 .ws-chip-c:hover { border-color: #99BBEA; color: #4A72BA; }
 .ws-chip-c.active { background: linear-gradient(135deg, #EEF3FC, #F0F5FF); border-color: #3385FF; color: #1A6FFF; font-weight: 600; box-shadow: 0 1px 4px rgba(51, 133, 255, 0.1); }
+.ws-chip-skill { background: #faf5ff; color: #7c3aed; border-color: #e9d5ff; }
+.ws-chip-skill.active { background: #7c3aed; color: #fff; box-shadow: 0 3px 10px rgba(124, 58, 237, 0.3); }
 .ws-form-action-row { gap: 10px; padding: 8px 14px; }
 .ws-field-notes { flex: 1; min-width: 0; }
 .ws-input-notes { width: 100%; padding: 8px 12px; border: 1.5px solid #E8EFF8; border-radius: 9px; background: #FAFBFD; font-family: inherit; font-size: 13px; color: #1E3A5F; outline: none; resize: vertical; min-height: 34px; max-height: 80px; transition: border-color 0.2s, box-shadow 0.2s; box-sizing: border-box; line-height: 1.5; }

@@ -378,7 +378,7 @@ const fetchCallHistory = async () => {
 
 const goToItinerary = (itineraryId: string) => {
   closeDetail()
-  router.push({ path: '/battle/create', query: { itineraryId } })
+  router.push({ path: '/workspace', query: { itineraryId } })
 }
 
 onMounted(() => {

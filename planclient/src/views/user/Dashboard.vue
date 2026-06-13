@@ -14,7 +14,7 @@
             </p>
           </div>
           <div class="welcome-actions">
-            <button class="action-btn-primary" @click="handleProtectedNavigation('/battle/create')">
+            <button class="action-btn-primary" @click="handleProtectedNavigation('/workspace')">
               <span class="action-icon">🚀</span>
               <span>新建行程规划</span>
             </button>
@@ -45,7 +45,7 @@
                 class="dest-card"
                 :class="{ 'dest-card-hero': idx === 0 }"
                 :style="{ '--delay': `${idx * 0.07}s` }"
-                @click="handleProtectedNavigation({ path: '/battle/create', query: { destination: city.name } })"
+                @click="handleProtectedNavigation({ path: '/workspace', query: { destination: city.name } })"
               >
                 <div class="dest-image-wrapper">
                   <img
