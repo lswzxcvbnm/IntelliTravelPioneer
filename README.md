@@ -13,6 +13,8 @@ IntelliTravel Pioneer 是一个**AI Agent应用**，采用Plan-Execute-Verify三
 - **SSE实时推送**: Agent思考过程、工具调用实时可视化
 - **自愈能力**: 工具失败自动重试、JSON截断自动修复
 - **智能行程修改**: AI自主识别用户意图（删除/替换/修改）
+- **多轮对话**: 支持持续对话优化行程
+- **技能系统**: 可扩展的技能插件机制
 
 ## 技术架构
 
@@ -51,7 +53,17 @@ agent-project/
 ├── intellitravel-pioneer/    # 后端Spring Boot项目
 │   ├── src/main/java/        # Java源码
 │   │   ├── controller/       # REST控制器
+│   │   │   ├── AmApiController.java      # 地图API
+│   │   │   ├── ConversationController.java # 对话管理
+│   │   │   ├── ItineraryController.java   # 行程规划
+│   │   │   ├── SkillController.java       # 技能管理
+│   │   │   ├── ToolController.java        # 工具管理
+│   │   │   └── UserController.java        # 用户管理
 │   │   ├── service/          # 业务逻辑层
+│   │   │   ├── agent/        # Agent核心逻辑
+│   │   │   ├── amap/         # 高德地图服务
+│   │   │   ├── mcp/          # MCP协议服务
+│   │   │   └── skill/        # 技能服务
 │   │   ├── repository/       # 数据访问层
 │   │   ├── entity/           # 实体类
 │   │   ├── dto/              # 数据传输对象
@@ -60,17 +72,54 @@ agent-project/
 │   ├── src/main/resources/   # 配置文件、模板
 │   ├── pom.xml               # Maven配置
 │   └── intellitravel.sql     # 数据库脚本
+│
 ├── planclient/               # 前端Vue.js项目
 │   ├── src/
 │   │   ├── api/              # API接口封装
-│   │   ├── views/            # 页面组件
+│   │   │   ├── chat.ts           # AI聊天接口
+│   │   │   ├── conversation.ts   # 对话管理接口
+│   │   │   ├── itinerary.ts      # 行程规划接口
+│   │   │   ├── skill.ts          # 技能管理接口
+│   │   │   ├── tools.ts          # 工具管理接口
+│   │   │   ├── trips.ts          # 旅行管理接口
+│   │   │   └── user.ts           # 用户接口
+│   │   ├── components/       # 通用组件
+│   │   │   └── BackButton.vue    # 返回按钮
+│   │   ├── composables/      # 组合式函数
+│   │   │   ├── useConversation.ts # 对话状态
+│   │   │   ├── useDragDrop.ts     # 拖拽功能
+│   │   │   └── useItinerary.ts    # 行程状态
+│   │   ├── constants/        # 常量定义
+│   │   │   └── tool.ts           # 工具常量
 │   │   ├── router/           # 路由配置
 │   │   ├── stores/           # Pinia状态管理
-│   │   └── assets/           # 静态资源
+│   │   ├── types/            # TypeScript类型
+│   │   ├── utils/            # 工具函数
+│   │   └── views/            # 页面组件
+│   │       ├── battle/       # Agent管理页面
+│   │       ├── conversation/ # 对话模块
+│   │       ├── user/         # 用户模块
+│   │       └── workspace/    # 工作区（核心）
 │   ├── package.json          # Node.js配置
 │   └── vite.config.ts        # Vite配置
-└── Changes.md                # 项目修改记录
+│
+└── README.md                 # 项目说明
 ```
+
+## 前端路由
+
+| 路径 | 页面 | 说明 |
+|------|------|------|
+| `/` | - | 重定向至 `/dashboard` |
+| `/login` | Login | 用户登录 |
+| `/register` | Register | 用户注册 |
+| `/dashboard` | Dashboard | 首页仪表盘 |
+| `/workspace` | Workspace | **AI行程规划**（核心页面） |
+| `/battle` | BattleCockpit | 行程仓库 |
+| `/battle/skills` | SkillManage | 技能工作台 |
+| `/tools` | ToolsManagement | 工具管理 |
+| `/conversation` | ConversationList | 对话历史列表 |
+| `/conversation/:id` | ConversationDetail | 对话详情 |
 
 ## 核心功能
 
@@ -118,24 +167,37 @@ Phase 3: VERIFY（审核阶段）
 
 ### 4. 行程管理
 
-- 新建行程：AI自主规划，支持多种参数配置
-- 修改行程：智能意图识别（删除/替换/修改描述）
-- 行程存储：JSON格式，支持拖拽排序、编辑
-- 行程分享：生成精美海报（Thymeleaf + Playwright）
+- **新建行程**: AI自主规划，支持表单/对话两种输入模式
+- **修改行程**: 智能意图识别（删除/替换/修改描述）
+- **行程存储**: JSON格式，支持拖拽排序、编辑
+- **行程分享**: 生成精美海报（Thymeleaf + Playwright）
 
-### 5. 用户与社交系统
+### 5. 对话系统
+
+- **多轮对话**: 支持持续对话优化行程
+- **对话历史**: 保存所有对话记录，可随时查看
+- **行程关联**: 对话自动关联生成的行程
+- **实时日志**: 显示Agent思考和工具调用过程
+
+### 6. 技能与工具系统
+
+- **技能管理**: 创建、编辑、删除自定义技能
+- **工具管理**: 查看和配置可用的MCP工具
+- **技能市场**: 浏览和使用社区技能
+
+### 7. 用户系统
 
 - 用户注册/登录（JWT认证）
+- 个人信息管理
 - 关注/粉丝系统
 - 社区帖子/评论/点赞/收藏
-- 私信功能
-- 时光胶囊
 
 ## 数据库设计
 
 包含15张核心表：
 - **用户系统**: user, user_health, user_follow, user_friend
 - **行程系统**: itinerary, real_time_trip, trip_trajectory_map
+- **对话系统**: conversation, conversation_message
 - **社区系统**: community_post, community_comment, community_like
 - **旅行报告**: trip_report, trip_summary, challenge_record
 
@@ -150,7 +212,25 @@ Phase 3: VERIFY（审核阶段）
 - `POST /api/itinerary/generate/stream` — SSE流式生成行程
 - `POST /api/itinerary/modify/stream` — SSE流式修改行程
 - `POST /api/itinerary/save` — 保存行程
+- `PUT /api/itinerary/{id}` — 更新行程
 - `GET /api/itinerary/detail/{id}` — 获取行程详情
+- `GET /api/itinerary/list` — 获取行程列表
+
+### 对话模块 (`/api/conversation`)
+- `POST /api/conversation` — 创建对话
+- `GET /api/conversation/list` — 获取对话列表
+- `GET /api/conversation/{id}/messages` — 获取对话消息
+- `POST /api/conversation/{id}/link` — 关联行程到对话
+
+### 技能模块 (`/api/skill`)
+- `GET /api/skill/list` — 获取技能列表
+- `POST /api/skill` — 创建技能
+- `PUT /api/skill/{id}` — 更新技能
+- `DELETE /api/skill/{id}` — 删除技能
+
+### 工具模块 (`/api/tools`)
+- `GET /api/tools/list` — 获取工具列表
+- `POST /api/tools/{id}/toggle` — 启用/禁用工具
 
 ### 地图模块 (`/api/amap`)
 - `POST /api/amap/geocode` — 地理编码
@@ -189,12 +269,8 @@ npm run dev
 ## 项目状态
 
 **当前版本**: 活跃开发中  
-**最后更新**: 2026年5月7日  
+**最后更新**: 2026年6月14日  
 **主要方向**: Agent架构优化、用户体验提升
-
-## 迭代计划
-
-详见 [迭代计划文档](./iteration-plan.md)
 
 ## 许可证
 
