@@ -114,12 +114,11 @@ agent-project/
 | `/login` | Login | 用户登录 |
 | `/register` | Register | 用户注册 |
 | `/dashboard` | Dashboard | 首页仪表盘 |
-| `/workspace` | Workspace | **AI行程规划**（核心页面） |
+| `/workspace` | Workspace | **AI行程规划**（核心页面，支持 `?convId=` 恢复对话、`?itineraryId=` 编辑行程） |
 | `/battle` | BattleCockpit | 行程仓库 |
 | `/battle/skills` | SkillManage | 技能工作台 |
 | `/tools` | ToolsManagement | 工具管理 |
 | `/conversation` | ConversationList | 对话历史列表 |
-| `/conversation/:id` | ConversationDetail | 对话详情 |
 
 ## 核心功能
 

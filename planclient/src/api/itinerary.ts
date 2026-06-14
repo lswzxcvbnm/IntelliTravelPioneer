@@ -21,6 +21,8 @@ export interface RouteItem {
     name: string
     description: string
     location: Location
+    /** 大体时间段，如 上午/中午/下午/晚上，非精确时间 */
+    timeSlot?: string
 }
 
 export interface DayPlan {

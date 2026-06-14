@@ -60,11 +60,6 @@ const router = createRouter({
       component: () => import('../views/conversation/ConversationList.vue')
     },
     {
-      path: '/conversation/:id',
-      name: 'ConversationDetail',
-      component: () => import('../views/conversation/ConversationDetail.vue')
-    },
-    {
       path: '/workspace',
       name: 'Workspace',
       component: Workspace

@@ -26,7 +26,7 @@
                 v-for="(sp, i) in suggestedPrompts"
                 :key="i"
                 class="ws-sp-card"
-                @click="handleSend(sp)"
+                @click="handleSuggestedPrompt(sp)"
               >
                 <span class="ws-sp-icon">{{ spIcons[i] }}</span>
                 <span class="ws-sp-text">{{ sp }}</span>
@@ -120,6 +120,7 @@
               :key="m.value"
               class="ws-mode-tab"
               :class="{ active: inputMode === m.value }"
+              :disabled="isGenerating || isRefining"
               @click="inputMode = m.value"
             >
               <span class="ws-mode-icon">{{ m.icon }}</span>
@@ -132,6 +133,7 @@
             v-if="inputMode === 'form' && !editablePlan"
             :isGenerating="isGenerating"
             :skills="mySkills"
+            :prefill="formPrefill"
             @submit="handleFormSubmit"
             @switchMode="inputMode = $event"
           />
@@ -153,118 +155,18 @@
       </div>
 
       <!-- 右侧：行程画布 -->
-      <aside class="ws-canvas">
-        <div class="ws-canvas-header">
-          <h3>行程画布</h3>
-          <button v-if="editablePlan" class="ws-save-btn-compact" @click="handleSave" :disabled="isSaving">
-            {{ isSaving ? '保存中...' : '💾 保存' }}
-          </button>
-        </div>
-
-        <div class="ws-canvas-body">
-          <!-- 空状态 -->
-          <div v-if="!editablePlan" class="ws-canvas-empty">
-            <div class="ws-canvas-empty-icon">🗺️</div>
-            <p>生成行程后，这里将显示可编辑的行程画布</p>
-          </div>
-
-          <!-- 编辑态：行程内容 -->
-          <template v-else>
-            <!-- 标题（可编辑） -->
-            <input
-              v-model="editablePlan.title"
-              class="ws-plan-title"
-              placeholder="行程标题"
-            />
-
-            <!-- 元信息行 -->
-            <div class="ws-plan-meta">
-              <span>📅 {{ editablePlan.totalDays }} 天</span>
-              <span>💰 ¥{{ editablePlan.estimatedCost || 0 }}</span>
-              <span>📍 {{ totalItems }} 个地点</span>
-            </div>
-
-            <!-- 天数区块（带时间线） -->
-            <div class="ws-timeline">
-              <div
-                v-for="(day, dayIdx) in editablePlan.dailyPlans"
-                :key="day.dayNumber"
-                class="ws-day-section"
-                @dragover.prevent
-                @drop="onDayDrop(day.dayNumber)"
-              >
-                <!-- 时间线节点 -->
-                <div class="ws-timeline-node">
-                  <span class="ws-day-num">{{ day.dayNumber }}</span>
-                  <div class="ws-timeline-line" v-if="dayIdx < editablePlan.dailyPlans.length - 1"></div>
-                </div>
-
-                <div class="ws-day-content">
-                  <div class="ws-day-header">
-                    <span class="ws-day-label">Day {{ day.dayNumber }}</span>
-                  </div>
-
-                  <TransitionGroup name="item-list" tag="div" class="ws-items">
-                    <div
-                      v-for="(item, ii) in day.items"
-                      :key="`${day.dayNumber}-${ii}`"
-                      class="ws-item"
-                      :class="['type-' + getTypeClass(item.type), { expanded: isItemExpanded(day.dayNumber, ii) }]"
-                      draggable="true"
-                      @dragstart="onDragStart($event, day.dayNumber, ii)"
-                    >
-                      <div class="ws-item-header" @click="toggleItemExpand(day.dayNumber, ii)">
-                        <span class="ws-item-type-badge" :class="'badge-' + getTypeClass(item.type)">{{ item.type }}</span>
-                        <span class="ws-item-name">{{ item.name || '未命名' }}</span>
-                        <span class="ws-item-expand-arrow">{{ isItemExpanded(day.dayNumber, ii) ? '▲' : '▼' }}</span>
-                        <div class="ws-item-actions">
-                          <button @click.stop="moveItem(day.dayNumber, ii, 'up')" class="ws-item-btn move" :disabled="ii === 0" title="上移">↑</button>
-                          <button @click.stop="moveItem(day.dayNumber, ii, 'down')" class="ws-item-btn move" :disabled="ii === day.items.length - 1" title="下移">↓</button>
-                          <button @click.stop="handleDeleteItem(day.dayNumber, ii, item.name)" class="ws-item-btn delete" title="删除">×</button>
-                        </div>
-                      </div>
-
-                      <!-- 可展开详情 -->
-                      <transition name="item-expand">
-                        <div v-if="isItemExpanded(day.dayNumber, ii)" class="ws-item-detail">
-                          <div class="ws-detail-grid">
-                            <div v-if="item.description && item.description !== '暂无描述'" class="ws-detail-card">
-                              <div class="ws-detail-card-label">📝 描述</div>
-                              <div class="ws-detail-card-value">{{ item.description }}</div>
-                            </div>
-                            <div v-if="item.location?.name" class="ws-detail-card">
-                              <div class="ws-detail-card-label">📍 地点</div>
-                              <div class="ws-detail-card-value">{{ item.location.name }}</div>
-                            </div>
-                            <div v-if="hasValidCoords(item.location)" class="ws-detail-card">
-                              <div class="ws-detail-card-label">🌐 坐标</div>
-                              <div class="ws-detail-card-value">{{ item.location.lat }}, {{ item.location.lng }}</div>
-                            </div>
-                          </div>
-                          <div v-if="hasValidCoords(item.location)" class="ws-item-map-row">
-                            <a
-                              class="ws-item-map-link"
-                              :href="`https://uri.amap.com/marker?position=${item.location.lng},${item.location.lat}`"
-                              target="_blank"
-                              rel="noopener"
-                            >
-                              🗺️ 在地图中查看
-                            </a>
-                          </div>
-                        </div>
-                      </transition>
-                    </div>
-                  </TransitionGroup>
-
-                  <div v-if="day.items.length === 0" class="ws-empty-day">
-                    拖拽行程项到此处安排
-                  </div>
-                </div>
-              </div>
-            </div>
-          </template>
-        </div>
-      </aside>
+      <ItineraryCanvas
+        :editablePlan="editablePlan"
+        :isSaving="isSaving"
+        :totalItems="totalItems"
+        :expandedItems="expandedItems"
+        @save="handleSave"
+        @item-toggle="toggleItemExpand"
+        @item-delete="handleDeleteItem"
+        @drag-start="onDragStart"
+        @item-drop="(e, day, idx) => onDrop(e, day, idx)"
+        @day-drop="onDayDrop"
+      />
 
 
     </div>
@@ -277,7 +179,7 @@ import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { generateItineraryStream, modifyItineraryStream, saveItinerary, updateItinerary } from '../../api/itinerary'
 import type { ItineraryRequest, ItineraryPlan, GenerationStats } from '../../api/itinerary'
-import { linkItinerary } from '../../api/conversation'
+import { linkItinerary, updateConversation } from '../../api/conversation'
 import { listMySkills, type SkillVO } from '../../api/skill'
 import { useConversation } from '../../composables/useConversation'
 import { useItinerary } from '../../composables/useItinerary'
@@ -287,6 +189,7 @@ import { extractActionFromLog, TYPE_ICON_MAP } from '../../constants/tool'
 import ToolCallCard from './ToolCallCard.vue'
 import ChatInput from './ChatInput.vue'
 import FormInput from './FormInput.vue'
+import ItineraryCanvas from './ItineraryCanvas.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -343,17 +246,6 @@ function getTruncatedContent(content: string): string {
   return content.slice(0, 500) + '...'
 }
 
-// ===== 行程项移动 =====
-function moveItem(dayNum: number, idx: number, direction: 'up' | 'down') {
-  const day = editablePlan.value?.dailyPlans.find(d => d.dayNumber === dayNum)
-  if (!day) return
-  const newIdx = direction === 'up' ? idx - 1 : idx + 1
-  if (newIdx < 0 || newIdx >= day.items.length) return
-  const items = [...day.items]
-  ;[items[idx], items[newIdx]] = [items[newIdx], items[idx]]
-  day.items = items
-}
-
 // ===== 页面标题 =====
 const pageTitle = computed(() => {
   if (route.query.itineraryId) return '编辑行程'
@@ -374,6 +266,9 @@ const mySkills = ref<SkillVO[]>([])
 // ===== 输入模式（表单 / 对话） =====
 // 如果是延续对话（有 convId），默认使用对话模式
 const inputMode = ref<'form' | 'chat'>(route.query.convId ? 'chat' : 'form')
+
+// 表单预填（从建议提示词点击进入时使用）
+const formPrefill = ref<{ destination: string; days?: number } | null>(null)
 
 const inputModes = [
   { value: 'form' as const, label: '表单输入', icon: '📋' },
@@ -452,6 +347,47 @@ function buildRequestFromPlan(): ItineraryRequest {
   }
 }
 
+// ===== 自动更新对话标题和标签 =====
+const hasAutoUpdatedTitle = ref(false)
+
+async function autoUpdateConversationMeta(userText: string) {
+  if (!convId.value || hasAutoUpdatedTitle.value) return
+  const destination = extractDestination(userText)
+  if (!destination) return
+
+  hasAutoUpdatedTitle.value = true
+  try {
+    const days = extractDays(userText)
+    const title = days ? `${destination}${days}天游` : `${destination}之旅`
+    const tags = destination
+    await updateConversation(convId.value, { title, tags })
+  } catch (e) {
+    console.warn('[Workspace] auto update conversation title failed:', e)
+  }
+}
+
+// ===== 建议提示词点击 =====
+function handleSuggestedPrompt(text: string) {
+  if (isGenerating.value || isRefining.value) return
+
+  if (inputMode.value === 'form') {
+    // 表单模式：解析目的地和天数，预填收起表单并直接生成
+    const dest = extractDestination(text) || '未指定'
+    const days = extractDays(text) ?? 3
+    formPrefill.value = { destination: dest, days }
+    handleFormSubmit({
+      destination: dest,
+      days,
+      budgetLevel: 'medium',
+      interests: extractInterests(text),
+      additionalNotes: text,
+    })
+  } else {
+    // 对话模式：直接发送
+    handleSend(text)
+  }
+}
+
 // ===== 核心发送逻辑 =====
 async function handleSend(text: string) {
   if (!text || isGenerating.value || isRefining.value) return
@@ -459,6 +395,9 @@ async function handleSend(text: string) {
   addUserMessage(text)
   const assistMsgId = addAssistantMessage()
   await scrollToBottom()
+
+  // 首次发送时自动更新对话标题和标签
+  autoUpdateConversationMeta(text)
 
   if (!editablePlan.value) {
     await runGenerate(assistMsgId, text)
@@ -490,6 +429,16 @@ async function handleFormSubmit(request: {
   addUserMessage(summaryText)
   const assistMsgId = addAssistantMessage()
   await scrollToBottom()
+
+  // 表单模式下直接使用目的地信息更新对话标题和标签
+  if (convId.value && !hasAutoUpdatedTitle.value) {
+    hasAutoUpdatedTitle.value = true
+    const title = `${request.destination}${request.days}天游`
+    const tags = request.destination
+    updateConversation(convId.value, { title, tags }).catch(e =>
+      console.warn('[Workspace] auto update conversation title failed:', e)
+    )
+  }
 
   isGenerating.value = true
   liveLogs.value = []
@@ -680,12 +629,6 @@ async function autoSaveAndLinkItinerary() {
 // ===== 本地 UI 辅助 =====
 const expandedItems = ref<Set<string>>(new Set())
 
-
-
-function isItemExpanded(dayNum: number, idx: number): boolean {
-  return expandedItems.value.has(`${dayNum}-${idx}`)
-}
-
 function toggleItemExpand(dayNum: number, idx: number) {
   const k = `${dayNum}-${idx}`
   const s = new Set(expandedItems.value)
@@ -695,22 +638,6 @@ function toggleItemExpand(dayNum: number, idx: number) {
     s.add(k)
   }
   expandedItems.value = s
-}
-
-function hasValidCoords(loc: { lat: number; lng: number }): boolean {
-  return !!(loc && loc.lat !== 0 && loc.lng !== 0)
-}
-
-function getTypeClass(t: string): string {
-  const map: Record<string, string> = {
-    '景点': 'spot',
-    '餐饮': 'food',
-    '交通': 'traffic',
-    '住宿': 'hotel',
-    '休闲': 'relax',
-    '购物': 'shopping',
-  }
-  return map[t] || 'default'
 }
 
 // ===== 删除行程项（带二次确认） =====
@@ -760,9 +687,14 @@ onMounted(async () => {
   // 优先从 convId 加载：恢复对话历史 + 关联行程
   if (queryConvId) {
     convId.value = queryConvId
-    const { itineraryId: linkedItineraryId } = await loadConversationHistory(queryConvId)
+    const { itineraryId: linkedItineraryId, title: convTitle } = await loadConversationHistory(queryConvId)
 
-    console.log('[Workspace] loaded history - linkedItineraryId:', linkedItineraryId)
+    console.log('[Workspace] loaded history - linkedItineraryId:', linkedItineraryId, 'title:', convTitle)
+
+    // 如果已有非默认标题，标记为已自动更新，避免后续重复更新
+    if (convTitle && convTitle !== '新对话') {
+      hasAutoUpdatedTitle.value = true
+    }
 
     // 确定要加载的行程 ID：URL 参数优先，其次是对话关联的行程
     const effectiveItineraryId = queryItineraryId || linkedItineraryId
@@ -833,6 +765,7 @@ onBeforeRouteLeave(async (to, from, next) => {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
+  outline: none;
 }
 .ws-back-btn:hover { background: #F0F7FF; }
 
@@ -865,6 +798,7 @@ onBeforeRouteLeave(async (to, from, next) => {
   cursor: pointer;
   transition: all 0.15s;
   white-space: nowrap;
+  outline: none;
 }
 .ws-action-btn:hover:not(:disabled) {
   background: #F0F7FF;
@@ -957,6 +891,7 @@ onBeforeRouteLeave(async (to, from, next) => {
   background: #fff;
   cursor: pointer;
   transition: all 0.2s ease;
+  outline: none;
   font-size: 13px;
   color: #1E3A5F;
 }
@@ -1267,6 +1202,7 @@ onBeforeRouteLeave(async (to, from, next) => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
+  outline: none;
 }
 
 .ws-mode-tab.active {
@@ -1275,535 +1211,10 @@ onBeforeRouteLeave(async (to, from, next) => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
   font-weight: 600;
 }
-.ws-mode-tab:hover:not(.active) { color: #5B7FA5; }
+.ws-mode-tab:hover:not(.active):not(:disabled) { color: #5B7FA5; }
+.ws-mode-tab:disabled { opacity: 0.4; cursor: not-allowed; }
 .ws-mode-icon { font-size: 16px; }
 
 
 
-/* ====== 右侧画布 ====== */
-.ws-canvas {
-  width: 540px;
-  min-width: 480px;
-  flex-shrink: 0;
-  background: #fff;
-  border-left: 1px solid rgba(51, 133, 255, 0.06);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  transition: width 0.3s ease;
-}
-
-.ws-canvas-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  border-bottom: 1px solid rgba(51, 133, 255, 0.06);
-  flex-shrink: 0;
-  background: #fafbff;
-}
-.ws-canvas-header h3 {
-  font-size: 14px;
-  font-weight: 700;
-  color: #1E3A5F;
-  margin: 0;
-}
-
-.ws-canvas-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.ws-canvas-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 48px 16px;
-  text-align: center;
-  flex: 1;
-}
-.ws-canvas-empty-icon { font-size: 40px; }
-.ws-canvas-empty p { font-size: 13px; color: #94A3B8; margin: 0; }
-
-/* 行程标题 */
-.ws-plan-title {
-  width: 100%;
-  border: none;
-  background: transparent;
-  padding: 4px 6px;
-  font-size: 20px;
-  font-weight: 800;
-  color: #1E3A5F;
-  outline: none;
-  border-radius: 6px;
-  transition: background 0.15s;
-}
-.ws-plan-title::placeholder { color: #B8C9E0; font-weight: 600; }
-.ws-plan-title:focus { background: rgba(51, 133, 255, 0.04); box-shadow: 0 0 0 3px rgba(51, 133, 255, 0.08); }
-
-/* 元信息 */
-.ws-plan-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 8px 10px;
-  background: #F8FAFD;
-  border-radius: 10px;
-  font-size: 12px;
-  color: #64748b;
-  font-weight: 500;
-}
-
-/* 天数区块 */
-.ws-day-section { margin-bottom: 4px; }
-
-.ws-day-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0 6px;
-}
-.ws-day-num {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #3385FF, #1A6FFF);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 6px rgba(51, 133, 255, 0.25);
-}
-.ws-day-label {
-  font-size: 14px;
-  font-weight: 700;
-  color: #1E3A5F;
-  flex: 1;
-}
-.ws-add-item {
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px dashed rgba(51, 133, 255, 0.25);
-  background: transparent;
-  color: #3385FF;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.ws-add-item:hover { background: #F0F7FF; border-color: #3385FF; border-style: solid; }
-
-.ws-items {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding-left: 4px;
-}
-
-.ws-item {
-  border-radius: 9px;
-  background: #FAFBFC;
-  border: 1px solid rgba(51, 133, 255, 0.06);
-  transition: all 0.15s;
-  overflow: hidden;
-}
-.ws-item:hover {
-  border-color: rgba(51, 133, 255, 0.15);
-  box-shadow: 0 1px 4px rgba(51, 133, 255, 0.06);
-  background: #fff;
-}
-.ws-item.expanded {
-  border-color: rgba(51, 133, 255, 0.2);
-  box-shadow: 0 2px 8px rgba(51, 133, 255, 0.08);
-  background: #fff;
-}
-
-.ws-item-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.ws-item-header:hover {
-  background: rgba(51, 133, 255, 0.02);
-}
-
-.ws-item-icon { font-size: 16px; flex-shrink: 0; }
-.ws-item-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #1E3A5F;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ws-item-expand-arrow {
-  font-size: 9px;
-  color: #94A3B8;
-  flex-shrink: 0;
-  transition: transform 0.2s;
-}
-
-.ws-item-actions {
-  display: flex;
-  gap: 2px;
-  align-items: center;
-}
-
-.ws-item-btn {
-  padding: 4px 8px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.1s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 行程项展开详情 */
-.ws-item-detail {
-  padding: 0 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border-top: 1px solid rgba(51, 133, 255, 0.06);
-  background: rgba(248, 251, 255, 0.6);
-  cursor: default;
-}
-
-.ws-item-field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.ws-item-field.half { flex: 1; }
-
-.ws-item-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #7A8FA6;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.ws-item-input,
-.ws-item-select {
-  padding: 6px 10px;
-  border: 1px solid rgba(51, 133, 255, 0.12);
-  border-radius: 6px;
-  font-size: 13px;
-  color: #1E3A5F;
-  background: #fff;
-  outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.ws-item-input:focus,
-.ws-item-select:focus,
-.ws-item-textarea:focus {
-  border-color: #3385FF;
-  box-shadow: 0 0 0 3px rgba(51, 133, 255, 0.08);
-}
-.ws-item-input::placeholder,
-.ws-item-textarea::placeholder { color: #B8C9E0; }
-
-.ws-item-textarea {
-  padding: 6px 10px;
-  border: 1px solid rgba(51, 133, 255, 0.12);
-  border-radius: 6px;
-  font-size: 13px;
-  color: #1E3A5F;
-  background: #fff;
-  outline: none;
-  resize: vertical;
-  min-height: 40px;
-  font-family: inherit;
-  line-height: 1.5;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.ws-item-location-row {
-  display: flex;
-  gap: 8px;
-}
-
-.ws-item-map-row {
-  margin-top: 2px;
-}
-
-.ws-item-map-btn {
-  width: 100%;
-  padding: 7px 12px;
-  border: 1px dashed rgba(51, 133, 255, 0.2);
-  border-radius: 7px;
-  background: transparent;
-  color: #3385FF;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.ws-item-map-btn:hover:not(.disabled) {
-  background: rgba(51, 133, 255, 0.04);
-  border-style: solid;
-}
-.ws-item-map-btn.disabled {
-  color: #B8C9E0;
-  cursor: not-allowed;
-}
-
-/* 展开/折叠动画 */
-.item-expand-enter-active,
-.item-expand-leave-active {
-  transition: all 0.2s ease;
-  overflow: hidden;
-}
-.item-expand-enter-from,
-.item-expand-leave-to {
-  opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.ws-empty-day {
-  font-size: 12px;
-  color: #94A3B8;
-  text-align: center;
-  padding: 14px;
-  border: 1.5px dashed rgba(51, 133, 255, 0.1);
-  border-radius: 9px;
-  background: #fafcff;
-}
-
-/* 保存按钮 */
-.ws-save-btn {
-  width: 100%;
-  padding: 12px;
-  border-radius: 12px;
-  border: none;
-  background: linear-gradient(135deg, #3385FF 0%, #1A6FFF 100%);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 3px 10px rgba(51, 133, 255, 0.25);
-  margin-top: 8px;
-}
-.ws-save-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 5px 16px rgba(51, 133, 255, 0.35);
-}
-.ws-save-btn:disabled { background: #93c5fd; cursor: not-allowed; box-shadow: none; }
-
-/* ====== 消息状态指示 ====== */
-.ws-msg-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 4px;
-}
-
-.ws-msg-status {
-  font-size: 11px;
-  color: #94A3B8;
-}
-.ws-msg-status.sent {
-  color: #10B981;
-}
-
-/* ====== 消息展开/收起 ====== */
-.ws-expand-btn {
-  display: inline-block;
-  margin-top: 8px;
-  padding: 4px 12px;
-  border: 1px solid rgba(51, 133, 255, 0.2);
-  border-radius: 6px;
-  background: #F0F7FF;
-  color: #3385FF;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.ws-expand-btn:hover {
-  background: #E0EFFF;
-  border-color: #3385FF;
-}
-
-/* ====== 时间线视觉 ====== */
-.ws-timeline {
-  position: relative;
-  padding-left: 24px;
-}
-
-.ws-timeline-node {
-  position: absolute;
-  left: 0;
-  top: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.ws-timeline-line {
-  width: 2px;
-  flex: 1;
-  background: linear-gradient(180deg, #3385FF 0%, rgba(51, 133, 255, 0.2) 100%);
-  margin-top: 4px;
-  min-height: 60px;
-}
-
-.ws-day-section {
-  position: relative;
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.ws-day-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.ws-day-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0 8px;
-}
-
-/* ====== 行程项类型徽章 ====== */
-.ws-item-type-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.badge-spot {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3B82F6;
-}
-.badge-food {
-  background: rgba(245, 158, 11, 0.1);
-  color: #D97706;
-}
-.badge-traffic {
-  background: rgba(16, 185, 129, 0.1);
-  color: #059669;
-}
-.badge-hotel {
-  background: rgba(139, 92, 246, 0.1);
-  color: #7C3AED;
-}
-.badge-relax {
-  background: rgba(236, 72, 153, 0.1);
-  color: #DB2777;
-}
-.badge-shopping {
-  background: rgba(249, 115, 22, 0.1);
-  color: #EA580C;
-}
-
-/* ====== 行程项操作按钮 ====== */
-.ws-item-btn.move {
-  color: #94A3B8;
-  font-size: 14px;
-  padding: 2px 6px;
-}
-.ws-item-btn.move:hover:not(:disabled) {
-  color: #3385FF;
-  background: rgba(51, 133, 255, 0.06);
-}
-.ws-item-btn.move:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-.ws-item-btn.delete {
-  color: #94A3B8;
-  font-size: 16px;
-  padding: 2px 6px;
-}
-.ws-item-btn.delete:hover {
-  color: #EF4444;
-  background: rgba(239, 68, 68, 0.06);
-}
-
-/* ====== 结构化详情卡片 ====== */
-.ws-detail-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ws-detail-card {
-  background: #fff;
-  border: 1px solid rgba(51, 133, 255, 0.08);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-
-.ws-detail-card-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #7A8FA6;
-  margin-bottom: 4px;
-}
-
-.ws-detail-card-value {
-  font-size: 13px;
-  color: #1E3A5F;
-  line-height: 1.5;
-}
-
-/* ====== 画布头部保存按钮 ====== */
-.ws-save-btn-compact {
-  padding: 6px 14px;
-  border-radius: 8px;
-  border: none;
-  background: linear-gradient(135deg, #3385FF 0%, #1A6FFF 100%);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(51, 133, 255, 0.2);
-}
-.ws-save-btn-compact:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(51, 133, 255, 0.3);
-}
-.ws-save-btn-compact:disabled {
-  background: #93c5fd;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-/* TransitionGroup 动画 */
-.item-list-enter-active { transition: all 0.3s ease; }
-.item-list-leave-active { transition: all 0.2s ease; position: absolute; }
-.item-list-enter-from { opacity: 0; transform: translateX(-12px); }
-.item-list-leave-to { opacity: 0; transform: translateX(12px); }
-.item-list-move { transition: transform 0.3s ease; }
 </style>
