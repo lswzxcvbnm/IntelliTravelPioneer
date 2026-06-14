@@ -25,7 +25,7 @@ public interface TripPlanningAiClient {
         return new GenerationResult(plan, null);
     }
 
-    /** Check if message contains explicit modify keywords (改成/换成/删除/改进 etc.) */
+    /** Check if message contains explicit modify keywords */
     default boolean isModifyLike(String text) {
         if (text == null) return false;
         return text.contains("改成") || text.contains("换成") || text.contains("删除") ||
@@ -34,7 +34,19 @@ public interface TripPlanningAiClient {
                 text.contains("加一个") || text.contains("删掉") || text.contains("改一下") ||
                 text.contains("放到") || text.contains("挪到") || text.contains("移到") ||
                 text.contains("加入") || text.contains("新增") || text.contains("改进") ||
-                text.contains("优化") || text.contains("改一改") || text.contains("完善");
+                text.contains("优化") || text.contains("改一改") || text.contains("完善") ||
+                text.contains("多玩") || text.contains("少玩") || text.contains("多一天") ||
+                text.contains("少一天") || text.contains("加一天") || text.contains("减一天") ||
+                text.contains("多加") || text.contains("减少") || text.contains("延长") ||
+                text.contains("缩短") || text.contains("再多") || text.contains("少一点");
+    }
+
+    /**
+     * AI-backed intent classification: CHAT or MODIFY.
+     * Used as fallback when keyword matching fails.
+     */
+    default String classifyIntent(String userMessage) {
+        return "CHAT"; // default: no AI, just keyword-dependent
     }
 
     /** Generate a brief chat answer for non-modify questions in refine panel */

@@ -71,9 +71,20 @@ public class ItineraryServiceImpl implements ItineraryService {
         }
         java.util.function.Consumer<String> wrappedNotifier = buildNotifier(ctx, toolNotifier);
 
-        // Chat intercept: non-modify messages handled without Agent Loop
-        if (!tripPlanningAiClient.isModifyLike(userPrompt)) {
-            System.out.println(">>> [ItineraryServiceImpl] Chat detected, skipping modify flow <<<");
+        // Chat intercept: keyword → fast pass; fallback → AI classifier
+        boolean isModify;
+        if (tripPlanningAiClient.isModifyLike(userPrompt)) {
+            isModify = true;
+        } else {
+            // Keyword didn't match — ask AI to classify
+            System.out.println(">>> [ItineraryServiceImpl] No modify keyword detected, asking AI to classify... <<<");
+            String aiIntent = tripPlanningAiClient.classifyIntent(userPrompt);
+            isModify = "MODIFY".equals(aiIntent);
+            System.out.println(">>> [ItineraryServiceImpl] AI classified as: " + aiIntent + " <<<");
+        }
+
+        if (!isModify) {
+            System.out.println(">>> [ItineraryServiceImpl] Chat confirmed, skipping modify flow <<<");
             String planJson;
             try {
                 planJson = objectMapper.writeValueAsString(currentPlan);

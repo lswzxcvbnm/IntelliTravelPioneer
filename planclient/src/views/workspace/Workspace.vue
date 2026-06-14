@@ -76,7 +76,7 @@
                       <span class="ws-streaming-dots">
                         <span></span><span></span><span></span>
                       </span>
-                      <span>{{ currentAction || 'AI 正在思考...' }}</span>
+                      <span>{{ currentAction || 'AI 正在为你规划行程...' }}</span>
                     </div>
 
                     <!-- 阶段进度条 -->
@@ -88,8 +88,8 @@
                       <div class="ws-phase" :class="{ active: currentPhase.includes('VERIFY') }">验证</div>
                     </div>
 
-                    <!-- 实时日志（可折叠） -->
-                    <details v-if="liveLogs.length > 0" class="ws-live-logs" open>
+                    <!-- 实时日志（默认折叠，不干扰对话体验） -->
+                    <details v-if="liveLogs.length > 0" class="ws-live-logs">
                       <summary>查看实时日志 ({{ liveLogs.length }})</summary>
                       <div class="ws-log-list">
                         <div
@@ -197,7 +197,7 @@ const route = useRoute()
 // ===== 初始化 composables =====
 const {
   messages, messagesRef, addUserMessage, addAssistantMessage,
-  updateMessage, appendToMessage, finalizeMessage, scrollToBottom,
+  updateMessage, finalizeMessage, scrollToBottom,
   formatContent, formatTime, loadConversationHistory, isLoadingHistory,
 } = useConversation()
 
@@ -347,6 +347,28 @@ function buildRequestFromPlan(): ItineraryRequest {
   }
 }
 
+/** 根据行程计划生成自然语言的对话回复 */
+function buildPlanSummary(plan: ItineraryPlan): string {
+  const dest = plan.destination || ''
+  const totalSpots = plan.dailyPlans.reduce((sum, d) => sum + d.items.length, 0)
+  const lines: string[] = []
+  
+  lines.push(`好的！我已为你规划了${dest ? `**${dest}**` : ''}**${plan.totalDays} 天**行程：`)
+  lines.push('')
+  
+  plan.dailyPlans.forEach(day => {
+    const items = day.items.slice(0, 3).map(it => it.name || '未命名').join(' → ')
+    const more = day.items.length > 3 ? ` 等 ${day.items.length} 项` : ''
+    lines.push(`📅 **Day ${day.dayNumber}**（${day.items.length} 项）`)
+    lines.push(`　${items}${more}`)
+  })
+  
+  lines.push('')
+  lines.push(`预算约 ¥${plan.estimatedCost || 0}，共 ${totalSpots} 个地点。行程已展示在右侧画布中，你可以自由调整或继续与我对话修改。`)
+  
+  return lines.join('\n')
+}
+
 // ===== 自动更新对话标题和标签 =====
 const hasAutoUpdatedTitle = ref(false)
 
@@ -452,8 +474,9 @@ async function handleFormSubmit(request: {
         addLog('phase', '📋', phase.message)
       },
       (msg) => {
-        appendToMessage(assistMsgId, `\n${msg}`)
+        // 思考过程只记录到日志，不显示在对话中
         addLog('thought', '💡', msg.slice(0, 120))
+        currentAction.value = extractActionFromLog(msg) || '正在思考...'
       },
       (msg) => {
         addLog('tool', '🔧', msg)
@@ -461,6 +484,8 @@ async function handleFormSubmit(request: {
       },
       (plan) => {
         editablePlan.value = normalizePlan(plan)
+        // 生成自然语言总结替换对话内容
+        updateMessage(assistMsgId, { content: buildPlanSummary(plan), streaming: false })
       },
       (errMsg: any) => {
         const safeMsg = errMsg?.message || errMsg || '未知错误'
@@ -499,8 +524,9 @@ async function runGenerate(msgId: string, userPrompt: string) {
         addLog('phase', '📋', phase.message)
       },
       (msg) => {
-        appendToMessage(msgId, `\n${msg}`)
+        // 思考过程只记录到日志，不显示在对话中
         addLog('thought', '💡', msg.slice(0, 120))
+        currentAction.value = extractActionFromLog(msg) || '正在思考...'
       },
       (msg) => {
         addLog('tool', '🔧', msg)
@@ -508,6 +534,8 @@ async function runGenerate(msgId: string, userPrompt: string) {
       },
       (plan) => {
         editablePlan.value = normalizePlan(plan)
+        // 生成自然语言总结替换对话内容
+        updateMessage(msgId, { content: buildPlanSummary(plan), streaming: false })
       },
       (error) => {
         updateMessage(msgId, { content: `❌ 生成失败: ${error.message || '未知错误'}`, streaming: false })
@@ -546,8 +574,9 @@ async function runRefine(msgId: string, userPrompt: string) {
         addLog('phase', '📋', phase.message)
       },
       (msg) => {
-        appendToMessage(msgId, `\n${msg}`)
+        // 思考过程只记录到日志，不显示在对话中
         addLog('thought', '💡', msg.slice(0, 120))
+        currentAction.value = extractActionFromLog(msg) || '正在思考...'
       },
       (msg) => {
         addLog('tool', '🔧', msg)
@@ -555,6 +584,9 @@ async function runRefine(msgId: string, userPrompt: string) {
       },
       (plan) => {
         editablePlan.value = mergeRefinedPlan(originalPlan, normalizePlan(plan))
+        // 优化完成后生成自然语言回复
+        const summary = `好的！已根据你的要求优化了行程。修改后的方案共 **${editablePlan.value!.totalDays} 天**、${editablePlan.value!.dailyPlans.reduce((s, d) => s + d.items.length, 0)} 个地点。查看右侧画布即可看到更新后的行程。`
+        updateMessage(msgId, { content: summary, streaming: false })
       },
       (error) => {
         updateMessage(msgId, { content: `❌ 优化失败: ${error.message || '未知错误'}`, streaming: false })

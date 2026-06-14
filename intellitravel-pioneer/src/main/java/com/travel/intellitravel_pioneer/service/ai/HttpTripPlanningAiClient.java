@@ -322,9 +322,22 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             if (conversationId != null && !conversationId.isBlank() && userPrompt != null) {
                 String tempActionType = detectActionType(userPrompt);
                 if ("UPDATE_DAYS".equals(tempActionType)) {
-                    int newDays = extractDaysFromPrompt(userPrompt);
-                    if (newDays > 0 && newDays != request.getDays()) {
-                        int oldDays = request.getDays();
+                    int daysResult = extractDaysFromPrompt(userPrompt);
+                    int oldDays = request.getDays();
+                    int newDays;
+                    if (daysResult > 0) {
+                        // 明确数字，如 "改为5天" → 5
+                        newDays = daysResult;
+                    } else if (daysResult == -1) {
+                        // 相对+1，如 "多玩一天" → old + 1
+                        newDays = oldDays + 1;
+                    } else if (daysResult == -2) {
+                        // 相对-1，如 "少玩一天" → old - 1
+                        newDays = Math.max(1, oldDays - 1);
+                    } else {
+                        newDays = 0;
+                    }
+                    if (newDays > 0 && newDays != oldDays) {
                         log.info("【天数修改】将天数从 {} 改为 {}（在行程生成前更新）", oldDays, newDays);
                         request.setDays(newDays);
                         if (toolNotifier != null) {
@@ -428,29 +441,45 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             【意图识别与操作】
 
-            1.【纯删除意图】（如"删掉故宫""去掉第2天"）
+            1.【更改天数】（如"多玩一天""再加一天""少一天""延长到5天"）
+               注：此时 request 中的 totalDays 可能已被预先更新，以 request 中的值为准。
+
+               ★ 增加天数（如 3天→4天）：
+                 a) 保留原有的 3 天内容不变。
+                 b) 调用 maps_text_search 为新增的 Day 4 搜索推荐景点（用目的地名称+类型关键词，
+                    如"南京 热门景点"），选 2~4 个合适结果填入。
+                 c) 如果搜索结果不足，从原有行程中抽取最后一天的 1~2 项移到新天，并为被抽走的天补充新景点。
+
+               ★ 减少天数（如 3天→2天）：
+                 a) 删除最后一天（dayNumber 最大的），将其内容按类型就近插入到前面各天。
+                 b) 每项插入到同类型项目后面；如果前面没有同类型项目，追加到那天末尾。
+                 c) 如果某天项目数超过 5 个，考虑精简（保留最知名的）。
+
+            2.【纯删除意图】（如"删掉故宫""去掉第2天"）
                → 不需要调用任何工具，直接在已有 JSON 上删除指定条目。
 
-            2.【新增或替换地点】（如"加一个故宫""把长城换成颐和园""再加一天"）
+            3.【新增或替换地点】（如"加一个故宫""把长城换成颐和园"）
                → 必须调用 maps_text_search 查询新地点的真实名称和精确经纬度，
                  验证通过后才写入 JSON。严禁凭空编造坐标。
                → 如果 maps_text_search 返回空结果，尝试修改搜索关键词（如去掉"市/区"后缀），
                  若仍无结果，在 Thought 中说明并在最终结果中使用用户提供的名称，location 标注为 null。
 
-            3.【仅修改描述/预算】（如"门票改成60元""预算调整为2000"）
+            4.【仅修改描述/预算】（如"门票改成60元""预算调整为2000"）
                → 不需要调用工具，直接修改对应字段。
 
             【输出规范】
             - 不改动的部分原样保留
             - Thought 里说明每一步操作
+            - 更改天数时，新增的天必须用 maps_text_search 填充景点，不能留空
             - 新增/替换地点后必须做 SelfCheck
 
             【SelfCheck 自检（输出前必须完成）】
             Thought: SelfCheck:
+            OK 所有新增天都有景点填充 -> [已验证]
             OK 新增地点坐标来自工具返回 -> [已验证/存在未验证项]
-            OK 删除操作正确执行 -> [已完成]
+            OK totalDays 与 dailyPlans 数组长度一致 -> [一致]
+            OK 每天项目数合理（2~6项） -> [合理/第X天偏多]
             OK 预算仍与需求匹配 -> [匹配]
-            OK description 控制在30字以内 -> [通过]
 
             - 最终用 final_output 包裹完整修正 JSON，中间不要有其他文字
 
@@ -1700,14 +1729,20 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 text.contains("加一个") || text.contains("删掉") || text.contains("改一下") ||
                 text.contains("放到") || text.contains("挪到") || text.contains("移到") ||
                 text.contains("加入") || text.contains("新增") || text.contains("改进") ||
-                text.contains("优化") || text.contains("改一改") || text.contains("完善");
+                text.contains("优化") || text.contains("改一改") || text.contains("完善") ||
+                text.contains("多玩") || text.contains("少玩") || text.contains("多一天") ||
+                text.contains("少一天") || text.contains("加一天") || text.contains("减一天") ||
+                text.contains("多加") || text.contains("减少") || text.contains("延长") ||
+                text.contains("缩短") || text.contains("再多") || text.contains("少一点");
     }
 
     /**
      * Use AI to quickly classify user intent: CHAT or MODIFY.
-     * Very lightweight call (max_tokens=5, temperature=0).
+     * Very lightweight call (max_tokens=10, temperature=0).
+     * Used as fallback when keyword matching fails.
      */
-    private String quickClassifyChatOrModify(String userMessage) {
+    @Override
+    public String classifyIntent(String userMessage) {
         try {
             ObjectNode body = objectMapper.createObjectNode();
             body.put("model", llmModel);
@@ -2737,19 +2772,28 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private String detectActionType(String userPrompt) {
         if (userPrompt == null) return "UNKNOWN";
         if (userPrompt.contains("删除") || userPrompt.contains("去掉") ||
-                userPrompt.contains("移除") || userPrompt.contains("减少") ||
-                userPrompt.contains("删掉")) {
+                userPrompt.contains("移除") || userPrompt.contains("删掉")) {
             return "DELETE";
         }
         if (userPrompt.contains("增加") || userPrompt.contains("添加") || userPrompt.contains("新增")) {
             return "ADD";
         }
-        Pattern daysPattern = Pattern.compile("(改为|改成|变为|增加|减少)\\s*(\\d+)\\s*天");
+        // 天数变更：Pattern 匹配 + 自然表达
+        Pattern daysPattern = Pattern.compile("(改为|改成|变为|增加|减少|调整到)\\s*(\\d+)\\s*天");
         Matcher daysMatcher = daysPattern.matcher(userPrompt);
         if (daysMatcher.find()) {
             if (!userPrompt.matches("第\\d+天.*")) {
                 return "UPDATE_DAYS";
             }
+        }
+        // 自然语言天数变更表达
+        if (userPrompt.contains("多玩") || userPrompt.contains("少玩") ||
+                userPrompt.contains("加一天") || userPrompt.contains("减一天") ||
+                userPrompt.contains("多一天") || userPrompt.contains("少一天") ||
+                userPrompt.contains("再加一天") || userPrompt.contains("延长") ||
+                userPrompt.contains("缩短") || userPrompt.contains("多几天") ||
+                userPrompt.contains("少几天")) {
+            return "UPDATE_DAYS";
         }
         if (userPrompt.contains("改成") || userPrompt.contains("换成") || userPrompt.contains("修改") ||
                 userPrompt.contains("变为")) {
@@ -2766,7 +2810,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private int extractDaysFromPrompt(String prompt) {
         if (prompt == null || prompt.isBlank()) return 0;
 
-        // 匹配数字+天的模式
+        // 匹配数字+天的模式（如 "改为5天"→5, "增加2天"→2）
         Pattern pattern = Pattern.compile("(\\d+)\\s*天");
         Matcher matcher = pattern.matcher(prompt);
         if (matcher.find()) {
@@ -2775,6 +2819,15 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             } catch (NumberFormatException e) {
                 log.warn("提取天数失败: {}", matcher.group(1));
             }
+        }
+        // 自然语言天数变更：多一天/少一天 → 返回 -1 表示相对变更，由调用方计算
+        if (prompt.contains("多一天") || prompt.contains("多玩一天") || prompt.contains("加一天") ||
+                prompt.contains("再多一天") || prompt.contains("延长一天")) {
+            return -1; // 表示 +1 天
+        }
+        if (prompt.contains("少一天") || prompt.contains("少玩一天") || prompt.contains("减一天") ||
+                prompt.contains("缩短一天")) {
+            return -2; // 表示 -1 天
         }
         return 0;
     }
