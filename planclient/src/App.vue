@@ -17,11 +17,11 @@ const isBattleCreate = computed(() => route.path === '/workspace')
 
 const navItems = [
   { path: '/dashboard', label: '首页', icon: '🏠' },
+  { path: '/workspace', label: 'AI 行程规划', icon: '🚀' },
   { path: '/battle', label: '行程仓库', icon: '📋' },
+  { path: '/conversation', label: '对话历史', icon: '💬' },
   { path: '/battle/skills', label: '技能工作台', icon: '🧩' },
   { path: '/tools', label: '工具管理', icon: '🔧' },
-  { path: '/conversation', label: 'AI 对话', icon: '💬' },
-  { path: '/workspace', label: 'AI 工作台', icon: '🚀' },
 ]
 
 const goCreate = () => {
