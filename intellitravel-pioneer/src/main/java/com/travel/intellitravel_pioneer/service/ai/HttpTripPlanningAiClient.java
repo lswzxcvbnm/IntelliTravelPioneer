@@ -95,6 +95,12 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     @Value("${trip.ai.amap.mcp-url}")
     private String amapMcpUrl;
 
+    @Value("${trip.ai.loop.max-same-tool-consecutive:25}")
+    private int maxSameToolConsecutive;
+
+    @Value("${trip.ai.loop.same-args-threshold:3}")
+    private int sameArgsLoopThreshold;
+
     @Autowired
     private SkillService skillService;
 
@@ -1195,6 +1201,10 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         String lastToolName = "";
         String lastToolArgs = "";
         int consecutiveSameCalls = 0;
+        // Track recent distinct args to distinguish "legitimate sequential calls"
+        // from "cycling through the same args" (true loop)
+        java.util.LinkedHashSet<String> recentDistinctArgs = new java.util.LinkedHashSet<>();
+        final int recentArgsMaxSize = 20;
         while (true) {
             turn++;
             if (turn > maxTurns) {
@@ -1270,24 +1280,43 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                         }
                     }
                     
-                    // Detect loop: same tool + same args 3+ times consecutively → break
+                    // ── Tool-call loop detection ──
+                    // Two-tier: (1) exact-repeat → definite loop, low threshold;
+                    //           (2) same-tool-different-args → check arg novelty & hard cap
                     if (name.equals(lastToolName) && args.equals(lastToolArgs)) {
+                        // Same tool + identical args → very likely an infinite loop
                         consecutiveSameCalls++;
-                        if (consecutiveSameCalls >= 3) {
+                        if (consecutiveSameCalls >= sameArgsLoopThreshold) {
                             System.err.println("Detected tool call loop: " + name + " called " + consecutiveSameCalls + " times with same args, breaking");
                             throw new IntellitravelException("AI 陷入了重复调用的死循环（" + name + " x" + consecutiveSameCalls + "），请换个方式描述需求后重试");
                         }
                     } else if (name.equals(lastToolName)) {
-                        // Same tool, different args — still counts but with higher threshold
+                        // Same tool, different args — may be legitimate (e.g. geocoding many addresses)
                         consecutiveSameCalls++;
-                        if (consecutiveSameCalls >= 8) {
+
+                        // Hard cap: way too many consecutive calls to the same tool
+                        if (consecutiveSameCalls >= maxSameToolConsecutive) {
                             System.err.println("Detected tool call loop: " + name + " called " + consecutiveSameCalls + " times consecutively, breaking");
                             throw new IntellitravelException("AI 反复调用同一工具（" + name + " x" + consecutiveSameCalls + "），请换个方式描述需求后重试");
                         }
+
+                        // Novelty check: if these args have never appeared in the recent window,
+                        // the AI is making genuine forward progress, not looping
+                        if (!recentDistinctArgs.contains(args)) {
+                            recentDistinctArgs.add(args);
+                            if (recentDistinctArgs.size() > recentArgsMaxSize) {
+                                var it = recentDistinctArgs.iterator();
+                                it.next();
+                                it.remove();
+                            }
+                        }
+                        // If args ARE recycling, let the hard cap catch it eventually
                     } else {
                         consecutiveSameCalls = 0;
+                        recentDistinctArgs.clear();
                         lastToolName = name;
                         lastToolArgs = args;
+                        recentDistinctArgs.add(args);
                     }
 
                     System.out.println("Invoking tool: " + name);
