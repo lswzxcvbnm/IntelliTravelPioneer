@@ -1,18 +1,24 @@
 # IntelliTravel Pioneer - AI旅行规划Agent系统
 
-> 基于ReAct Agent架构的智能旅行规划系统，实现AI自主思考、工具调用、实时交互的完整闭环
+> 基于ReAct Agent架构的智能旅行规划系统，支持AI自主规划、智能修改、自然对话的完整闭环
 
 ## 项目概述
 
-IntelliTravel Pioneer 是一个**AI Agent应用**，采用Plan-Execute-Verify三阶段架构，通过MCP协议集成高德地图工具，实现AI自主规划旅行行程。系统通过SSE实时推送Agent思考过程，让用户透明地看到AI的决策逻辑。
+IntelliTravel Pioneer 是一个**AI Agent应用**，核心流程分两条路径：
+
+- **新建行程**：Plan → Execute → Verify 三阶段架构，通过MCP协议集成高德地图工具验证真实数据
+- **修改行程**：智能意图识别 → Agent Loop 直接修改，无需重新走完整三阶段
+
+系统通过SSE实时推送Agent执行进度，前端以自然对话形式展示结果（内部思考过程默认隐藏，可在实时日志面板中查看）。
 
 ### 核心特性
 
 - **ReAct Agent架构**: 三阶段自主规划（Plan → Execute → Verify）
 - **MCP工具集成**: 通过SSE连接高德地图，实时验证地理数据
-- **SSE实时推送**: Agent思考过程、工具调用实时可视化
+- **SSE实时推送**: Agent执行过程、工具调用实时可视化
 - **自愈能力**: 工具失败自动重试、JSON截断自动修复
-- **智能行程修改**: AI自主识别用户意图（删除/替换/修改）
+- **智能意图识别**: 关键词快速匹配 + AI分类器兜底，支持自然语言修改指令
+- **自然对话体验**: 修改行程时隐藏原始思考过程，输出结构化自然语言总结
 - **多轮对话**: 支持持续对话优化行程
 - **技能系统**: 可扩展的技能插件机制
 
@@ -50,60 +56,60 @@ IntelliTravel Pioneer 是一个**AI Agent应用**，采用Plan-Execute-Verify三
 
 ```
 agent-project/
-├── intellitravel-pioneer/    # 后端Spring Boot项目
-│   ├── src/main/java/        # Java源码
-│   │   ├── controller/       # REST控制器
-│   │   │   ├── AmApiController.java      # 地图API
-│   │   │   ├── ConversationController.java # 对话管理
-│   │   │   ├── ItineraryController.java   # 行程规划
-│   │   │   ├── SkillController.java       # 技能管理
-│   │   │   ├── ToolController.java        # 工具管理
-│   │   │   └── UserController.java        # 用户管理
-│   │   ├── service/          # 业务逻辑层
-│   │   │   ├── agent/        # Agent核心逻辑
-│   │   │   ├── amap/         # 高德地图服务
-│   │   │   ├── mcp/          # MCP协议服务
-│   │   │   └── skill/        # 技能服务
-│   │   ├── repository/       # 数据访问层
-│   │   ├── entity/           # 实体类
-│   │   ├── dto/              # 数据传输对象
-│   │   ├── configure/        # 配置类
-│   │   └── exception/        # 异常处理
-│   ├── src/main/resources/   # 配置文件、模板
-│   ├── pom.xml               # Maven配置
-│   └── intellitravel.sql     # 数据库脚本
+├── intellitravel-pioneer/        # 后端Spring Boot项目
+│   ├── src/main/java/            # Java源码
+│   │   ├── controller/           # REST控制器
+│   │   │   ├── AiChatController.java        # AI聊天
+│   │   │   ├── AmApiController.java         # 地图API
+│   │   │   ├── ConversationController.java  # 对话管理
+│   │   │   ├── ItineraryController.java     # 行程规划（SSE）
+│   │   │   ├── SkillController.java         # 技能管理
+│   │   │   ├── ToolController.java          # 工具管理
+│   │   │   └── UserController.java          # 用户管理
+│   │   ├── service/              # 业务逻辑层
+│   │   │   ├── ai/               # AI客户端（Agent Loop + Prompt + 意图识别）
+│   │   │   │   ├── TripPlanningAiClient.java       # AI客户端接口
+│   │   │   │   └── HttpTripPlanningAiClient.java   # 实现（含全部Prompt模板）
+│   │   │   ├── serviceImpl/      # 服务实现
+│   │   │   │   ├── ItineraryServiceImpl.java       # 行程服务（意图识别入口）
+│   │   │   │   └── AiChatServiceImpl.java          # AI聊天服务（独立入口）
+│   │   │   ├── IntentStateMachine.java    # 意图状态机
+│   │   │   ├── EntityTracker.java         # 实体追踪
+│   │   │   ├── ActionTracker.java         # 操作历史
+│   │   │   ├── MemoryManager.java         # 工作记忆
+│   │   │   └── ConversationContextManager.java  # 上下文管理（滑动窗口+摘要压缩）
+│   │   ├── repository/           # 数据访问层
+│   │   ├── entity/               # 实体类
+│   │   ├── dto/                  # 数据传输对象
+│   │   ├── configure/            # 配置类
+│   │   └── exception/            # 异常处理
+│   ├── src/main/resources/       # 配置文件
+│   ├── pom.xml                   # Maven配置
+│   └── intellitravel.sql         # 数据库脚本
 │
-├── planclient/               # 前端Vue.js项目
+├── planclient/                   # 前端Vue.js项目
 │   ├── src/
-│   │   ├── api/              # API接口封装
-│   │   │   ├── chat.ts           # AI聊天接口
-│   │   │   ├── conversation.ts   # 对话管理接口
-│   │   │   ├── itinerary.ts      # 行程规划接口
-│   │   │   ├── skill.ts          # 技能管理接口
-│   │   │   ├── tools.ts          # 工具管理接口
-│   │   │   ├── trips.ts          # 旅行管理接口
-│   │   │   └── user.ts           # 用户接口
-│   │   ├── components/       # 通用组件
-│   │   │   └── BackButton.vue    # 返回按钮
-│   │   ├── composables/      # 组合式函数
-│   │   │   ├── useConversation.ts # 对话状态
-│   │   │   ├── useDragDrop.ts     # 拖拽功能
-│   │   │   └── useItinerary.ts    # 行程状态
-│   │   ├── constants/        # 常量定义
-│   │   │   └── tool.ts           # 工具常量
-│   │   ├── router/           # 路由配置
-│   │   ├── stores/           # Pinia状态管理
-│   │   ├── types/            # TypeScript类型
-│   │   ├── utils/            # 工具函数
-│   │   └── views/            # 页面组件
-│   │       ├── battle/       # Agent管理页面
-│   │       ├── conversation/ # 对话模块
-│   │       ├── user/         # 用户模块
-│   │       └── workspace/    # 工作区（核心）
-│   ├── package.json          # Node.js配置
-│   └── vite.config.ts        # Vite配置
+│   │   ├── api/                  # API接口封装
+│   │   ├── components/           # 通用组件
+│   │   ├── composables/          # 组合式函数（useConversation/useDragDrop/useItinerary）
+│   │   ├── constants/            # 常量定义（工具名称/图标映射）
+│   │   ├── router/               # 路由配置
+│   │   ├── stores/               # Pinia状态管理
+│   │   ├── types/                # TypeScript类型
+│   │   ├── utils/                # 工具函数
+│   │   └── views/                # 页面组件
+│   │       ├── conversation/     # 对话历史列表
+│   │       ├── user/             # 用户登录/注册
+│   │       └── workspace/        # 工作区（核心页面集合）
+│   │           ├── Workspace.vue         # AI行程规划工作台
+│   │           ├── ItineraryCanvas.vue   # 行程画布（时间线+拖拽编辑）
+│   │           ├── FormInput.vue         # 结构化表单输入
+│   │           ├── ChatInput.vue         # 自然语言输入
+│   │           └── ToolCallCard.vue      # 工具调用展示
+│   ├── package.json
+│   └── vite.config.ts
 │
-└── README.md                 # 项目说明
+└── README.md
 ```
 
 ## 前端路由
@@ -114,8 +120,8 @@ agent-project/
 | `/login` | Login | 用户登录 |
 | `/register` | Register | 用户注册 |
 | `/dashboard` | Dashboard | 首页仪表盘 |
-| `/workspace` | Workspace | **AI行程规划**（核心页面，支持 `?convId=` 恢复对话、`?itineraryId=` 编辑行程） |
-| `/battle` | BattleCockpit | 行程仓库 |
+| `/workspace` | Workspace | **核心页面**，支持 `?convId=` 恢复对话、`?itineraryId=` 编辑行程 |
+| `/battle` | BattleCockpit | 行程仓库，管理已保存的行程 |
 | `/battle/skills` | SkillManage | 技能工作台 |
 | `/tools` | ToolsManagement | 工具管理 |
 | `/conversation` | ConversationList | 对话历史列表 |
@@ -124,7 +130,7 @@ agent-project/
 
 ### 1. AI Agent行程规划
 
-**三阶段架构**:
+**新建行程—三阶段架构**:
 ```
 Phase 1: PLAN（规划阶段）
     ├── 输入：用户需求（目的地、天数、兴趣、预算）
@@ -137,7 +143,7 @@ Phase 2: EXECUTE（执行阶段）
     │   ├── Tool Call：调用高德地图MCP工具验证真实数据
     │   ├── SelfCheck：自检完整性/真实性/合理性
     │   └── final_output：输出完整JSON行程
-    └── 工具失败自动重试（最多2次）
+    └── 工具失败自动重试（最多2轮）
 
 Phase 3: VERIFY（审核阶段）
     ├── 独立审核员检查：完整性、真实性、合理性、预算匹配
@@ -145,9 +151,32 @@ Phase 3: VERIFY（审核阶段）
     └── 输出审核结论
 ```
 
+**修改行程—意图识别 + Agent Loop**:
+```
+用户消息（如"我想多玩一天""把故宫换成天坛"）
+  │
+  ├── isModifyLike() 关键词快速匹配
+  │     ├── 命中 → 直接进入 Agent Loop
+  │     └── 未命中 → classifyIntent() AI分类器兜底
+  │                      ├── MODIFY → 进入 Agent Loop
+  │                      └── CHAT  → 聊天回答，不改行程
+  │
+  ├── detectActionType() 识别操作类型
+  │     ├── UPDATE_DAYS → 预更新天数（支持"多一天"等自然表达）
+  │     ├── DELETE       → 删除指定条目
+  │     ├── ADD / MODIFY → 新增或替换
+  │     └── UNKNOWN      → Agent自行判断
+  │
+  └── Agent Loop（修改专用 Prompt）
+        ├── 天数变更：自动搜索填充新景点
+        ├── 增删替换：调用高德地图MCP验证
+        └── final_output：返回修正后的完整行程
+```
+
 ### 2. MCP工具集成
 
 通过SSE协议连接高德地图MCP服务，Agent可调用的工具：
+
 - `maps_text_search` — 地点搜索
 - `maps_around_search` — 周边搜索
 - `maps_weather` — 天气查询
@@ -158,33 +187,48 @@ Phase 3: VERIFY（审核阶段）
 ### 3. SSE实时推送
 
 前端通过 `fetch` + `ReadableStream` 连接后端SSE，实时接收：
-- `phase` 事件：三阶段进度
-- `thought` 事件：Agent的思考过程
+
+- `phase` 事件：阶段进度
+- `thought` 事件：Agent思考过程（显示在可折叠的实时日志面板中）
 - `tool` 事件：工具调用详情
 - `result` 事件：最终行程JSON
 - `stats` 事件：Token使用统计
+- `conversationId` 事件：对话ID
 
-### 4. 行程管理
+### 4. 行程画布
 
-- **新建行程**: AI自主规划，支持表单/对话两种输入模式
-- **修改行程**: 智能意图识别（删除/替换/修改描述）
-- **行程存储**: JSON格式，支持拖拽排序、编辑
-- **行程分享**: 生成精美海报（Thymeleaf + Playwright）
+右侧画布实时展示行程时间线，支持：
+
+- **时间线视图**: 按天分组，清晰展示每日行程项
+- **点击展开**: 查看地点描述、坐标信息，一键跳转高德地图
+- **拖拽排序**: 跨天拖拽调整行程项顺序
+- **删除操作**: 每个行程项独立删除按钮
+- **空状态引导**: 无行程时展示画布功能介绍
 
 ### 5. 对话系统
 
 - **多轮对话**: 支持持续对话优化行程
-- **对话历史**: 保存所有对话记录，可随时查看
-- **行程关联**: 对话自动关联生成的行程
-- **实时日志**: 显示Agent思考和工具调用过程
+- **对话历史**: 保存所有对话记录，按标签/标题搜索
+- **行程关联**: 对话自动关联生成的行程，卡片展示"已有行程"标识
+- **自然回复**: AI回复为结构化自然语言，不再展示原始思考过程
+- **实时日志**: 思考过程默认折叠，需要时可点击展开查看
 
-### 6. 技能与工具系统
+### 6. 智能意图识别
+
+双通道架构确保准确性：
+
+| 通道 | 机制 | 场景 |
+|------|------|------|
+| 关键词匹配 | `isModifyLike()` 52个修改关键词 | 明确指令（"改成""删除""增加"等），0延迟 |
+| AI分类 | `classifyIntent()` 轻量LLM调用 | 自然表达（"多玩一天""想换个地方"等）|
+
+### 7. 技能与工具系统
 
 - **技能管理**: 创建、编辑、删除自定义技能
 - **工具管理**: 查看和配置可用的MCP工具
 - **技能市场**: 浏览和使用社区技能
 
-### 7. 用户系统
+### 8. 用户系统
 
 - 用户注册/登录（JWT认证）
 - 个人信息管理
@@ -194,6 +238,7 @@ Phase 3: VERIFY（审核阶段）
 ## 数据库设计
 
 包含15张核心表：
+
 - **用户系统**: user, user_health, user_follow, user_friend
 - **行程系统**: itinerary, real_time_trip, trip_trajectory_map
 - **对话系统**: conversation, conversation_message
@@ -203,47 +248,73 @@ Phase 3: VERIFY（审核阶段）
 ## API接口
 
 ### 用户模块 (`/api/user`)
-- `POST /api/user` — 用户注册
-- `POST /api/user/login` — 用户登录
-- `GET /api/user/{username}` — 获取用户信息
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/user` | 用户注册 |
+| POST | `/api/user/login` | 用户登录 |
+| GET | `/api/user/{username}` | 获取用户信息 |
 
 ### 行程规划模块 (`/api/itinerary`)
-- `POST /api/itinerary/generate/stream` — SSE流式生成行程
-- `POST /api/itinerary/modify/stream` — SSE流式修改行程
-- `POST /api/itinerary/save` — 保存行程
-- `PUT /api/itinerary/{id}` — 更新行程
-- `GET /api/itinerary/detail/{id}` — 获取行程详情
-- `GET /api/itinerary/list` — 获取行程列表
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/itinerary/generate/stream` | SSE流式生成行程 |
+| POST | `/api/itinerary/modify/stream` | SSE流式修改行程 |
+| POST | `/api/itinerary/save` | 保存行程 |
+| PUT | `/api/itinerary/{id}` | 更新行程 |
+| GET | `/api/itinerary/detail/{id}` | 获取行程详情 |
+| GET | `/api/itinerary/list` | 获取行程列表 |
+
+### AI聊天模块 (`/api/ai`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/ai/chat/stream` | SSE流式AI聊天（独立入口，含意图分类） |
 
 ### 对话模块 (`/api/conversation`)
-- `POST /api/conversation` — 创建对话
-- `GET /api/conversation/list` — 获取对话列表
-- `GET /api/conversation/{id}/messages` — 获取对话消息
-- `POST /api/conversation/{id}/link` — 关联行程到对话
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/conversation` | 创建对话 |
+| GET | `/api/conversation/list` | 获取对话列表 |
+| GET | `/api/conversation/{id}/messages` | 获取对话消息 |
+| POST | `/api/conversation/{id}/link` | 关联行程到对话 |
 
 ### 技能模块 (`/api/skill`)
-- `GET /api/skill/list` — 获取技能列表
-- `POST /api/skill` — 创建技能
-- `PUT /api/skill/{id}` — 更新技能
-- `DELETE /api/skill/{id}` — 删除技能
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/skill/list` | 获取技能列表 |
+| POST | `/api/skill` | 创建技能 |
+| PUT | `/api/skill/{id}` | 更新技能 |
+| DELETE | `/api/skill/{id}` | 删除技能 |
 
 ### 工具模块 (`/api/tools`)
-- `GET /api/tools/list` — 获取工具列表
-- `POST /api/tools/{id}/toggle` — 启用/禁用工具
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/tools/list` | 获取工具列表 |
+| POST | `/api/tools/{id}/toggle` | 启用/禁用工具 |
 
 ### 地图模块 (`/api/amap`)
-- `POST /api/amap/geocode` — 地理编码
-- `GET /api/amap/weather` — 天气查询
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/amap/geocode` | 地理编码 |
+| GET | `/api/amap/weather` | 天气查询 |
 
 ## 快速开始
 
 ### 环境要求
+
 - Java 21+
 - Node.js 18+
 - MySQL 8.0+
 - Maven 3.8+
 
 ### 后端启动
+
 ```bash
 cd intellitravel-pioneer
 # 配置环境变量
@@ -255,6 +326,7 @@ export AMAP_KEY=your_amap_key
 ```
 
 ### 前端启动
+
 ```bash
 cd planclient
 npm install
@@ -262,14 +334,15 @@ npm run dev
 ```
 
 ### 访问地址
+
 - 前端: http://localhost:5173
 - 后端API: http://localhost:8080
 
 ## 项目状态
 
-**当前版本**: 活跃开发中  
-**最后更新**: 2026年6月14日  
-**主要方向**: Agent架构优化、用户体验提升
+**当前版本**: 活跃开发中
+**最后更新**: 2026年6月14日
+**主要方向**: Agent架构优化、意图识别增强、前端体验提升
 
 ## 许可证
 
@@ -277,4 +350,4 @@ npm run dev
 
 ---
 
-> 本项目展示了如何将ReAct Agent架构应用于实际业务场景，实现了AI自主规划、工具调用、实时交互的完整闭环。
+> 本项目展示了如何将ReAct Agent架构应用于实际业务场景，实现了AI自主规划、工具调用、智能意图识别、实时交互的完整闭环。
