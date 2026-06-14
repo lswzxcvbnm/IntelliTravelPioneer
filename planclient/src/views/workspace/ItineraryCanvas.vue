@@ -5,14 +5,6 @@
       <h3 class="canvas-header-title">
         <span class="header-icon">🗺</span> 行程画布
       </h3>
-      <button
-        v-if="editablePlan"
-        class="canvas-save-btn"
-        :disabled="isSaving"
-        @click="$emit('save')"
-      >
-        {{ isSaving ? '保存中...' : '保存' }}
-      </button>
     </div>
 
     <!-- 画布主体 -->
@@ -233,20 +225,6 @@ function isExpanded(dayNum: number, idx: number): boolean {
   margin-right: 6px;
   font-size: 16px;
 }
-
-.canvas-save-btn {
-  padding: 5px 14px;
-  border: none;
-  border-radius: 4px;
-  background: #3385FF;
-  color: #fff;
-  font-size: 13px;
-  cursor: pointer;
-  font-family: inherit;
-  outline: none;
-}
-.canvas-save-btn:hover:not(:disabled) { background: #1A6FFF; }
-.canvas-save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ===== 画布主体 ===== */
 .canvas-body {
