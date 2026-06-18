@@ -13,9 +13,16 @@ public class GenerationResult {
     private ItineraryPlan plan;
     private GenerationStats stats;
     private String conversationId;
+    private String chatAnswer;
 
     public GenerationResult(ItineraryPlan plan, GenerationStats stats) {
         this.plan = plan;
         this.stats = stats;
+    }
+
+    public GenerationResult(ItineraryPlan plan, GenerationStats stats, String chatAnswer) {
+        this.plan = plan;
+        this.stats = stats;
+        this.chatAnswer = chatAnswer;
     }
 }

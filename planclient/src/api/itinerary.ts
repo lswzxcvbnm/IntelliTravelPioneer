@@ -96,7 +96,8 @@ export async function generateItineraryStream(
     onResult: (plan: ItineraryPlan) => void,
     onError: (err: any) => void,
     onStats?: (stats: GenerationStats) => void,
-    onConversationId?: (id: string) => void
+    onConversationId?: (id: string) => void,
+    onChat?: (answer: string) => void
 ) {
     const token = getAuthToken();
     try {
@@ -166,6 +167,10 @@ export async function generateItineraryStream(
                                 if (onConversationId) {
                                     onConversationId(eventData);
                                 }
+                            } else if (eventName === 'chat') {
+                                if (onChat) {
+                                    onChat(eventData);
+                                }
                             }
                         } catch (e) {
                             console.error('Failed to process event/data:', eventName, eventData, e);
@@ -198,7 +203,8 @@ export async function modifyItineraryStream(
     onResult: (plan: ItineraryPlan) => void,
     onError: (err: any) => void,
     onStats?: (stats: GenerationStats) => void,
-    onConversationId?: (id: string) => void
+    onConversationId?: (id: string) => void,
+    onChat?: (answer: string) => void
 ) {
     const token = getAuthToken();
     try {
@@ -267,6 +273,10 @@ export async function modifyItineraryStream(
                             } else if (eventName === 'conversationId') {
                                 if (onConversationId) {
                                     onConversationId(eventData);
+                                }
+                            } else if (eventName === 'chat') {
+                                if (onChat) {
+                                    onChat(eventData);
                                 }
                             }
                         } catch (e) {

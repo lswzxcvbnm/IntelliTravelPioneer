@@ -154,20 +154,32 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         System.out.println(">>> conversationId: " + conversationId);
         System.out.println(">>> userPrompt: " + userPrompt);
 
-        // Pre-check: if the message has NO modify keywords, treat as chat and return immediately
-        if (userPrompt != null && !userPrompt.isBlank() && !isModifyLike(userPrompt)) {
-            System.out.println(">>> NO MODIFY KEYWORDS detected, replying as chat (not modifying itinerary) <<<");
-            String chatAnswer = answerChatQuestion(userPrompt, currentPlanJson);
-            if (toolNotifier != null) {
-                sendPhaseNotification(toolNotifier, "REFINE_END", chatAnswer);
-                toolNotifier.accept("THOUGHT:" + (chatAnswer.length() > 200 ? chatAnswer.substring(0, 200) + "..." : chatAnswer));
+        // AI意图分类：判断是修改行程还是闲聊
+        if (userPrompt != null && !userPrompt.isBlank()) {
+            String intentJson = classifyAndStructureModifyIntent(userPrompt, currentPlanJson);
+            System.out.println(">>> Modify intent analysis result: " + intentJson);
+            
+            if (!isModifyIntent(intentJson)) {
+                // 闲聊：调用聊天回答，不修改行程
+                System.out.println(">>> Intent is CHAT, generating chat answer <<<");
+                String chatAnswer = answerChatQuestion(userPrompt, currentPlanJson);
+                if (toolNotifier != null) {
+                    sendPhaseNotification(toolNotifier, "REFINE_END", chatAnswer);
+                    toolNotifier.accept("THOUGHT:" + (chatAnswer.length() > 200 ? chatAnswer.substring(0, 200) + "..." : chatAnswer));
+                }
+                try {
+                    ItineraryPlan originalPlan = objectMapper.readValue(currentPlanJson, ItineraryPlan.class);
+                    return new GenerationResult(originalPlan, null, chatAnswer);
+                } catch (Exception e) {
+                    return new GenerationResult(null, null, chatAnswer);
+                }
             }
-            try {
-                ItineraryPlan originalPlan = objectMapper.readValue(currentPlanJson, ItineraryPlan.class);
-                return new GenerationResult(originalPlan, null);
-            } catch (Exception e) {
-                return new GenerationResult(null, null);
-            }
+            
+            // 修改请求：构建结构化修改提示词
+            System.out.println(">>> Intent is MODIFY, building structured prompt <<<");
+            String structuredPrompt = buildStructuredModifyPrompt(intentJson, userPrompt);
+            userPrompt = structuredPrompt; // 用结构化提示词替换原始输入
+            System.out.println(">>> Structured modify prompt: " + structuredPrompt.substring(0, Math.min(100, structuredPrompt.length())) + "...");
         }
 
         EntityTracker.ExtractedEntities entities = null;
@@ -806,6 +818,44 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     private GenerationResult callLlmForItinerary(String token, ItineraryRequest request,
             java.util.function.Consumer<String> toolNotifier) {
         String conversationId = request.getConversationId();
+        
+        // ========== AI意图分类：判断是闲聊还是生成行程 ==========
+        String userPrompt = request.getUserPrompt();
+        if (userPrompt != null && !userPrompt.isBlank()) {
+            // 通过AI判断用户意图
+            String intent = classifyGenerateIntent(userPrompt);
+            System.out.println(">>> AI classified intent: " + intent + " for input: " + userPrompt.substring(0, Math.min(50, userPrompt.length())) + "...");
+            
+            if ("CHAT".equals(intent)) {
+                // 闲聊：调用聊天回答，不生成行程
+                System.out.println(">>> Intent is CHAT, generating chat answer <<<");
+                String chatAnswer = answerChatQuestion(userPrompt, "{}");
+                if (toolNotifier != null) {
+                    sendPhaseNotification(toolNotifier, "CHAT_ANSWER", chatAnswer);
+                    toolNotifier.accept("THOUGHT:" + (chatAnswer.length() > 200 ? chatAnswer.substring(0, 200) + "..." : chatAnswer));
+                }
+                return new GenerationResult(null, null, chatAnswer);
+            }
+            
+            // 生成请求：用AI提取结构化信息并填入request
+            System.out.println(">>> Intent is GENERATE, extracting structured info <<<");
+            if (toolNotifier != null) {
+                sendPhaseNotification(toolNotifier, "INTENT_ANALYSIS", "正在分析您的旅行需求...");
+            }
+            String structuredJson = structureTravelRequest(userPrompt);
+            if (structuredJson != null && !structuredJson.isBlank()) {
+                applyStructuredRequest(request, structuredJson);
+            }
+            // 保留原始用户输入作为additionalNotes的补充
+            String existingNotes = request.getAdditionalNotes();
+            if (existingNotes == null || existingNotes.isBlank()) {
+                request.setAdditionalNotes(userPrompt);
+            }
+            System.out.println(">>> Final request: destination=" + request.getDestination() 
+                + ", days=" + request.getDays() 
+                + ", interests=" + request.getInterests());
+        }
+        
         EntityTracker.ExtractedEntities entities = null;
         MemoryManager.WorkingMemory workingMemory = null;
         ConversationContextManager.OptimizedContext optimizedContext = null;
@@ -1197,7 +1247,6 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         }
 
         int turn = 0;
-        int maxTurns = 30; // safety limit to prevent infinite loops
         String lastToolName = "";
         String lastToolArgs = "";
         int consecutiveSameCalls = 0;
@@ -1207,10 +1256,6 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         final int recentArgsMaxSize = 20;
         while (true) {
             turn++;
-            if (turn > maxTurns) {
-                System.err.println("Agent loop reached max safe turns (" + maxTurns + "), stopping to prevent infinite loop");
-                throw new IntellitravelException("Agent 思考轮次过多，请稍后重试或简化您的需求");
-            }
             System.out.println("Agent turn " + turn);
             JsonNode response = callLlmChat(messages, tools);
             accumulateUsageFromResponse(response, stats);
@@ -1747,25 +1792,6 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     }
 
     /**
-     * Quick non-AI check: does the message look like a modification request?
-     * If clearly "modify-like", skip the expensive AI classification call.
-     */
-    public boolean isModifyLike(String text) {
-        if (text == null) return false;
-        return text.contains("改成") || text.contains("换成") || text.contains("删除") ||
-                text.contains("去掉") || text.contains("增加") || text.contains("添加") ||
-                text.contains("调整") || text.contains("修改") || text.contains("替换") ||
-                text.contains("加一个") || text.contains("删掉") || text.contains("改一下") ||
-                text.contains("放到") || text.contains("挪到") || text.contains("移到") ||
-                text.contains("加入") || text.contains("新增") || text.contains("改进") ||
-                text.contains("优化") || text.contains("改一改") || text.contains("完善") ||
-                text.contains("多玩") || text.contains("少玩") || text.contains("多一天") ||
-                text.contains("少一天") || text.contains("加一天") || text.contains("减一天") ||
-                text.contains("多加") || text.contains("减少") || text.contains("延长") ||
-                text.contains("缩短") || text.contains("再多") || text.contains("少一点");
-    }
-
-    /**
      * Use AI to quickly classify user intent: CHAT or MODIFY.
      * Very lightweight call (max_tokens=10, temperature=0).
      * Used as fallback when keyword matching fails.
@@ -1815,6 +1841,362 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     }
 
     /**
+     * Use AI to classify user intent for itinerary generation: CHAT or GENERATE.
+     * CHAT = general conversation, questions, recommendations (not requesting itinerary creation)
+     * GENERATE = user wants to create/plan a trip
+     * Very lightweight call (max_tokens=10, temperature=0).
+     */
+    public String classifyGenerateIntent(String userMessage) {
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("model", llmModel);
+            body.put("temperature", 0.0);
+            body.put("max_tokens", 10);
+
+            ArrayNode msgs = body.putArray("messages");
+            ObjectNode sysMsg = objectMapper.createObjectNode();
+            sysMsg.put("role", "system");
+            sysMsg.put("content", "你是一个意图分类器。只回复一个词：CHAT 或 GENERATE。\n\n"
+                    + "GENERATE = 用户想要创建/规划一次旅行行程。特征：\n"
+                    + "- 明确提到目的地（城市/景点/国家）\n"
+                    + "- 提到出行时间（几天、几月、周末等）\n"
+                    + "- 要求制定/规划/安排行程\n"
+                    + "- 询问如何规划某地旅行\n"
+                    + "- 包含出发地+目的地+时间的组合\n\n"
+                    + "CHAT = 其余一切，包括：\n"
+                    + "- 一般性问题（\"北京有什么好吃的\"、\"日本签证怎么办\"）\n"
+                    + "- 闲聊（\"你好\"、\"谢谢\"）\n"
+                    + "- 旅行相关知识咨询（\"去高原要注意什么\"）\n"
+                    + "- 模糊的意向表达（\"我想去旅行\"但没有具体信息）\n"
+                    + "- 对已有行程的讨论（不涉及创建新行程）\n\n"
+                    + "注意：\n"
+                    + "- 只有用户表达了明确的行程创建意图才算 GENERATE\n"
+                    + "- 单纯询问信息不算 GENERATE\n"
+                    + "- 如果不确定，默认 CHAT");
+            msgs.add(sysMsg);
+
+            ObjectNode userMsg = objectMapper.createObjectNode();
+            userMsg.put("role", "user");
+            userMsg.put("content", "用户消息：\"" + userMessage + "\"\n\n意图：");
+            msgs.add(userMsg);
+
+            String jsonBody = objectMapper.writeValueAsString(body);
+            String requestUrl = llmBaseUrl + llmChatPath;
+
+            String response = RestClient.create()
+                    .post()
+                    .uri(requestUrl)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .headers(h -> h.setBearerAuth(llmApiKey))
+                    .body(jsonBody)
+                    .retrieve()
+                    .body(String.class);
+
+            JsonNode root = objectMapper.readTree(response);
+            String content = root.path("choices").get(0).path("message").path("content").asText("").trim().toUpperCase();
+            if (content.contains("GENERATE")) return "GENERATE";
+            if (content.contains("CHAT")) return "CHAT";
+            // Ambiguous — safer to treat as chat to avoid expensive generation
+            System.out.println(">>> Generate intent classification ambiguous: '" + content + "', defaulting to CHAT <<<");
+            return "CHAT";
+        } catch (Exception e) {
+            System.err.println("Generate intent classification failed, defaulting to CHAT: " + e.getMessage());
+            return "CHAT";
+        }
+    }
+
+    /**
+     * Use AI to classify modify intent and extract structured modification instructions.
+     * Returns a JSON string with intent and structured modify request, or null for CHAT.
+     * 
+     * Output format:
+     * {
+     *   "intent": "MODIFY" | "CHAT",
+     *   "modifyType": "replace" | "add" | "remove" | "adjust" | "swap" | null,
+     *   "target": "修改目标描述",
+     *   "details": "具体修改内容"
+     * }
+     */
+    public String classifyAndStructureModifyIntent(String userMessage, String currentPlanJson) {
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("model", llmModel);
+            body.put("temperature", 0.1);
+            body.put("max_tokens", 300);
+
+            ArrayNode msgs = body.putArray("messages");
+            ObjectNode sysMsg = objectMapper.createObjectNode();
+            sysMsg.put("role", "system");
+            sysMsg.put("content", "你是一个行程修改意图分析器。分析用户消息，判断是修改行程还是闲聊。\n\n"
+                    + "输出严格JSON格式：\n"
+                    + "{\n"
+                    + "  \"intent\": \"MODIFY\" 或 \"CHAT\",\n"
+                    + "  \"modifyType\": \"replace|add|remove|adjust|swap|null\",\n"
+                    + "  \"target\": \"修改目标（如：第2天、故宫、酒店等）\",\n"
+                    + "  \"details\": \"具体修改内容描述\"\n"
+                    + "}\n\n"
+                    + "判断规则：\n"
+                    + "MODIFY（修改行程）特征：\n"
+                    + "- 要求替换/更换某个景点或活动（\"把故宫换成天坛\"）\n"
+                    + "- 要求添加/增加内容（\"加一个博物馆\"、\"多安排一天购物\"）\n"
+                    + "- 要求删除/去掉内容（\"删掉第二天的安排\"、\"不要去长城\"）\n"
+                    + "- 要求调整时间/顺序（\"把上午的行程调到下午\"）\n"
+                    + "- 要求交换顺序（\"第一天和第二天互换\"）\n"
+                    + "- 明确指向行程结构（天数、景点、酒店、餐饮等）\n\n"
+                    + "CHAT（闲聊/咨询）特征：\n"
+                    + "- 询问信息（\"北京有什么好吃的？\"、\"故宫门票多少钱？\"）\n"
+                    + "- 征求建议（\"你觉得行程合理吗？\"、\"还有什么推荐？\"）\n"
+                    + "- 闲聊（\"谢谢\"、\"好的\"）\n"
+                    + "- 不涉及具体行程修改的讨论\n\n"
+                    + "modifyType 说明：\n"
+                    + "- replace: 替换现有内容\n"
+                    + "- add: 添加新内容\n"
+                    + "- remove: 删除内容\n"
+                    + "- adjust: 调整时间/顺序/数量\n"
+                    + "- swap: 交换两个内容的位置\n"
+                    + "- null: 如果是CHAT则为null\n\n"
+                    + "示例：\n"
+                    + "输入：\"把故宫换成颐和园\"\n"
+                    + "输出：{\"intent\":\"MODIFY\",\"modifyType\":\"replace\",\"target\":\"故宫\",\"details\":\"换成颐和园\"}\n\n"
+                    + "输入：\"第二天有什么安排？\"\n"
+                    + "输出：{\"intent\":\"CHAT\",\"modifyType\":null,\"target\":null,\"details\":\"询问第二天行程安排\"}");
+            msgs.add(sysMsg);
+
+            ObjectNode userMsg = objectMapper.createObjectNode();
+            userMsg.put("role", "user");
+            userMsg.put("content", "当前行程概要：" + (currentPlanJson != null ? currentPlanJson.substring(0, Math.min(200, currentPlanJson.length())) + "..." : "无") + "\n\n"
+                    + "用户消息：\"" + userMessage + "\"\n\nJSON输出：");
+            msgs.add(userMsg);
+
+            String jsonBody = objectMapper.writeValueAsString(body);
+            String requestUrl = llmBaseUrl + llmChatPath;
+
+            String response = RestClient.create()
+                    .post()
+                    .uri(requestUrl)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .headers(h -> h.setBearerAuth(llmApiKey))
+                    .body(jsonBody)
+                    .retrieve()
+                    .body(String.class);
+
+            JsonNode root = objectMapper.readTree(response);
+            String content = root.path("choices").get(0).path("message").path("content").asText("").trim();
+            System.out.println(">>> Modify intent analysis: " + content);
+            
+            // 提取JSON（处理可能的markdown代码块包裹）
+            if (content.contains("```json")) {
+                content = content.substring(content.indexOf("```json") + 7, content.lastIndexOf("```")).trim();
+            } else if (content.contains("```")) {
+                content = content.substring(content.indexOf("```") + 3, content.lastIndexOf("```")).trim();
+            }
+            
+            return content;
+        } catch (Exception e) {
+            System.err.println("Failed to classify modify intent: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Parse modify intent JSON and determine if it's a modify request.
+     * Returns true if MODIFY, false if CHAT.
+     */
+    private boolean isModifyIntent(String intentJson) {
+        try {
+            if (intentJson == null || intentJson.isBlank()) return false;
+            JsonNode json = objectMapper.readTree(intentJson);
+            return json.has("intent") && "MODIFY".equals(json.get("intent").asText());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    /**
+     * Build structured modify prompt from parsed intent JSON.
+     * Combines the structured info with original user message for clarity.
+     */
+    private String buildStructuredModifyPrompt(String intentJson, String originalMessage) {
+        try {
+            if (intentJson == null || intentJson.isBlank()) return originalMessage;
+            JsonNode json = objectMapper.readTree(intentJson);
+            
+            StringBuilder prompt = new StringBuilder();
+            prompt.append("【结构化修改指令】\n");
+            
+            if (json.has("modifyType") && !json.get("modifyType").isNull()) {
+                String type = json.get("modifyType").asText();
+                String typeDesc = switch (type) {
+                    case "replace" -> "替换";
+                    case "add" -> "添加";
+                    case "remove" -> "删除";
+                    case "adjust" -> "调整";
+                    case "swap" -> "交换";
+                    default -> type;
+                };
+                prompt.append("- 操作类型：").append(typeDesc).append("\n");
+            }
+            
+            if (json.has("target") && !json.get("target").isNull() && !json.get("target").asText("").isBlank()) {
+                prompt.append("- 修改目标：").append(json.get("target").asText()).append("\n");
+            }
+            
+            if (json.has("details") && !json.get("details").isNull() && !json.get("details").asText("").isBlank()) {
+                prompt.append("- 具体内容：").append(json.get("details").asText()).append("\n");
+            }
+            
+            prompt.append("\n【原始用户输入】\n").append(originalMessage);
+            
+            return prompt.toString();
+        } catch (Exception e) {
+            return originalMessage;
+        }
+    }
+
+    /**
+     * Use AI to extract structured travel requirements from user's natural language input.
+     * Returns a JSON string that can be parsed into ItineraryRequest fields.
+     */
+    public String structureTravelRequest(String userMessage) {
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("model", llmModel);
+            body.put("temperature", 0.1);
+            body.put("max_tokens", 300);
+
+            ArrayNode msgs = body.putArray("messages");
+            ObjectNode sysMsg = objectMapper.createObjectNode();
+            sysMsg.put("role", "system");
+            sysMsg.put("content", "你是一个旅行需求提取器。从用户的自然语言中提取旅行信息，输出JSON格式。\n\n"
+                    + "输出格式（严格JSON，不要有其他文字）：\n"
+                    + "{\n"
+                    + "  \"destination\": \"目的地城市或地区\",\n"
+                    + "  \"days\": 3,\n"
+                    + "  \"budgetLevel\": \"low/medium/high\",\n"
+                    + "  \"interests\": [\"兴趣1\", \"兴趣2\"],\n"
+                    + "  \"additionalNotes\": \"其他需求或备注\"\n"
+                    + "}\n\n"
+                    + "规则：\n"
+                    + "- destination：必须提取，如果用户没说则为空字符串\n"
+                    + "- days：天数，默认3\n"
+                    + "  * \"三天\" \"3天\" \"三日\" → 3\n"
+                    + "  * \"一周\" \"7天\" → 7\n"
+                    + "  * \"周末\" → 2\n"
+                    + "  * \"五一\" \"国庆\"等假期 → 根据常见假期天数推断\n"
+                    + "  * 未提及 → 3\n"
+                    + "- budgetLevel：\n"
+                    + "  * \"省钱\" \"穷游\" \"经济\" \"便宜\" → low\n"
+                    + "  * \"豪华\" \"高端\" \"五星\" \"不差钱\" → high\n"
+                    + "  * 其他或未提及 → medium\n"
+                    + "- interests：兴趣标签数组\n"
+                    + "  * 历史/文化/古迹/博物馆/寺庙 → \"历史文化\"\n"
+                    + "  * 美食/小吃/餐厅/吃货 → \"美食\"\n"
+                    + "  * 自然/山水/风景/户外/徒步 → \"自然风光\"\n"
+                    + "  * 购物/商场/免税店 → \"购物\"\n"
+                    + "  * 海滩/海岛/潜水 → \"海滨度假\"\n"
+                    + "  * 亲子/孩子/乐园/动物园 → \"亲子游\"\n"
+                    + "  * 摄影/拍照/打卡 → \"摄影\"\n"
+                    + "  * 温泉/spa/休闲 → \"休闲放松\"\n"
+                    + "  * 未提及特定兴趣 → []\n"
+                    + "- additionalNotes：其他有用信息（出发地、同行人数、特殊需求等）\n\n"
+                    + "示例：\n"
+                    + "输入：\"我想带家人去北京玩三天，喜欢历史文化\"\n"
+                    + "输出：{\"destination\":\"北京\",\"days\":3,\"budgetLevel\":\"medium\",\"interests\":[\"历史文化\",\"亲子游\"],\"additionalNotes\":\"带家人出行\"}");
+            msgs.add(sysMsg);
+
+            ObjectNode userMsg = objectMapper.createObjectNode();
+            userMsg.put("role", "user");
+            userMsg.put("content", "用户输入：\"" + userMessage + "\"\n\nJSON输出：");
+            msgs.add(userMsg);
+
+            String jsonBody = objectMapper.writeValueAsString(body);
+            String requestUrl = llmBaseUrl + llmChatPath;
+
+            String response = RestClient.create()
+                    .post()
+                    .uri(requestUrl)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .headers(h -> h.setBearerAuth(llmApiKey))
+                    .body(jsonBody)
+                    .retrieve()
+                    .body(String.class);
+
+            JsonNode root = objectMapper.readTree(response);
+            String content = root.path("choices").get(0).path("message").path("content").asText("").trim();
+            System.out.println(">>> Structured travel JSON: " + content);
+            
+            // 提取JSON（处理可能的markdown代码块包裹）
+            if (content.contains("```json")) {
+                content = content.substring(content.indexOf("```json") + 7, content.lastIndexOf("```")).trim();
+            } else if (content.contains("```")) {
+                content = content.substring(content.indexOf("```") + 3, content.lastIndexOf("```")).trim();
+            }
+            
+            return content;
+        } catch (Exception e) {
+            System.err.println("Failed to structure travel request: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Parse structured JSON from AI and apply to ItineraryRequest.
+     */
+    private void applyStructuredRequest(ItineraryRequest request, String structuredJson) {
+        try {
+            JsonNode json = objectMapper.readTree(structuredJson);
+            
+            // 目的地
+            if (json.has("destination") && !json.get("destination").asText("").isBlank()) {
+                request.setDestination(json.get("destination").asText());
+            }
+            
+            // 天数
+            if (json.has("days") && json.get("days").isInt()) {
+                int days = json.get("days").asInt();
+                if (days > 0 && days <= 30) {  // 合理范围检查
+                    request.setDays(days);
+                }
+            }
+            
+            // 预算等级
+            if (json.has("budgetLevel") && !json.get("budgetLevel").asText("").isBlank()) {
+                String budget = json.get("budgetLevel").asText().toLowerCase();
+                if (budget.equals("low") || budget.equals("medium") || budget.equals("high")) {
+                    request.setBudgetLevel(budget);
+                }
+            }
+            
+            // 兴趣列表
+            if (json.has("interests") && json.get("interests").isArray()) {
+                List<String> interests = new ArrayList<>();
+                for (JsonNode interest : json.get("interests")) {
+                    String val = interest.asText("").trim();
+                    if (!val.isEmpty()) {
+                        interests.add(val);
+                    }
+                }
+                if (!interests.isEmpty()) {
+                    request.setInterests(interests);
+                }
+            }
+            
+            // 附加备注
+            if (json.has("additionalNotes") && !json.get("additionalNotes").asText("").isBlank()) {
+                request.setAdditionalNotes(json.get("additionalNotes").asText());
+            }
+            
+            System.out.println(">>> Applied structured request: destination=" + request.getDestination() 
+                + ", days=" + request.getDays() 
+                + ", budget=" + request.getBudgetLevel() 
+                + ", interests=" + request.getInterests());
+                
+        } catch (Exception e) {
+            System.err.println("Failed to parse structured request JSON: " + e.getMessage());
+        }
+    }
+
+    /**
      * Generate a brief chat answer when user asks a question in the refine panel.
      */
     public String answerChatQuestion(String userMessage, String currentPlanJson) {
@@ -1827,11 +2209,14 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             ArrayNode msgs = body.putArray("messages");
             ObjectNode sysMsg = objectMapper.createObjectNode();
             sysMsg.put("role", "system");
-            sysMsg.put("content", "你是一个智能旅行助手。用户正在查看一份旅行行程，但只是在咨询信息、征求建议或讨论行程方向，而非要求立即修改行程。\n\n"
+            sysMsg.put("content", "你是一个智能旅行助手。用户正在查看一份已经生成好的旅行行程，这是在已有行程基础上的延续对话，不是新对话。\n\n"
                     + "【当前行程上下文】\n" + currentPlanJson + "\n\n"
-                    + "请直接回答用户的问题或建议，200字以内。回答时可以参考当前行程的内容。如果用户说\"在XX的基础上改进\"，"
-                    + "请基于当前行程给出具体的改进建议，但不要直接替换行程内容。"
-                    + "回答末尾可以提醒：如需将建议应用到行程中，请明确说明具体如何修改。");
+                    + "重要规则：\n"
+                    + "1. 不要问候、不要询问用户偏好，直接回答用户的问题或建议\n"
+                    + "2. 200字以内，简洁有力\n"
+                    + "3. 回答时可以参考当前行程的内容\n"
+                    + "4. 如果用户说\"在XX的基础上改进\"，请基于当前行程给出具体的改进建议，但不要直接替换行程内容\n"
+                    + "5. 回答末尾可以提醒：如需将建议应用到行程中，请明确说明具体如何修改");
             msgs.add(sysMsg);
 
             ObjectNode userMsg = objectMapper.createObjectNode();

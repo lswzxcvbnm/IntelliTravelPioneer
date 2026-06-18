@@ -95,6 +95,16 @@ public class ItineraryController {
                 });
                 
                 System.out.println("====== generateItinerary completed, sending result ======");
+                
+                // 如果有聊天回答，先发送聊天回答事件
+                if (result.getChatAnswer() != null && !result.getChatAnswer().isBlank()) {
+                    System.out.println("Sending chat answer: " + result.getChatAnswer().substring(0, Math.min(100, result.getChatAnswer().length())) + "...");
+                    emitter.send(SseEmitter.event()
+                            .name("chat")
+                            .data(result.getChatAnswer()));
+                }
+                
+                // 发送行程结果（可能为空）
                 String planJson = objectMapper.writeValueAsString(result.getPlan());
                 System.out.println("Result JSON length: " + planJson.length());
                 emitter.send(SseEmitter.event()

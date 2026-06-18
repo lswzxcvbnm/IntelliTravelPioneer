@@ -393,28 +393,6 @@ function buildRequestFromPlan(): ItineraryRequest {
   }
 }
 
-/** 根据行程计划生成自然语言的对话回复 */
-function buildPlanSummary(plan: ItineraryPlan): string {
-  const dest = plan.destination || ''
-  const totalSpots = plan.dailyPlans.reduce((sum, d) => sum + d.items.length, 0)
-  const lines: string[] = []
-  
-  lines.push(`好的！我已为你规划了${dest ? `**${dest}**` : ''}**${plan.totalDays} 天**行程：`)
-  lines.push('')
-  
-  plan.dailyPlans.forEach(day => {
-    const items = day.items.slice(0, 3).map(it => it.name || '未命名').join(' → ')
-    const more = day.items.length > 3 ? ` 等 ${day.items.length} 项` : ''
-    lines.push(`📅 **Day ${day.dayNumber}**（${day.items.length} 项）`)
-    lines.push(`　${items}${more}`)
-  })
-  
-  lines.push('')
-  lines.push(`预算约 ¥${plan.estimatedCost || 0}，共 ${totalSpots} 个地点。行程已展示在右侧画布中，你可以自由调整或继续与我对话修改。`)
-  
-  return lines.join('\n')
-}
-
 // ===== 自动更新对话标题和标签 =====
 const hasAutoUpdatedTitle = ref(false)
 
@@ -467,9 +445,12 @@ async function handleSend(text: string) {
   // 首次发送时自动更新对话标题和标签
   autoUpdateConversationMeta(text)
 
+  // 意图分类由后端AI处理：CHAT/GENERATE/MODIFY
   if (!editablePlan.value) {
+    // 第一次对话：调用生成接口，后端AI会判断是聊天还是生成行程
     await runGenerate(assistMsgId, text)
   } else {
+    // 已有行程：调用修改接口，后端AI会判断是聊天还是修改行程
     await runRefine(assistMsgId, text)
   }
 }
@@ -531,9 +512,11 @@ async function handleFormSubmit(request: {
         currentAction.value = extractActionFromLog(msg)
       },
       (plan) => {
-        editablePlan.value = normalizePlan(plan)
-        // 生成自然语言总结替换对话内容
-        updateMessage(assistMsgId, { content: buildPlanSummary(plan), streaming: false })
+        // 如果 plan 为 null，可能是聊天回答，跳过行程更新
+        if (plan) {
+          editablePlan.value = normalizePlan(plan)
+          updateMessage(assistMsgId, { content: '✅ 行程方案已生成！你可以在右侧画布中查看和编辑。', streaming: false })
+        }
       },
       (errMsg: any) => {
         const safeMsg = errMsg?.message || errMsg || '未知错误'
@@ -545,7 +528,11 @@ async function handleFormSubmit(request: {
           updateMessage(assistMsgId, { toolCalls: JSON.stringify(stats.toolCalls) })
         }
       },
-      (cid) => { convId.value = cid }
+      (cid) => { convId.value = cid },
+      (chatAnswer) => {
+        // 收到聊天回答，直接显示
+        updateMessage(assistMsgId, { content: chatAnswer, streaming: false })
+      }
     )
     // 生成完成后，将思考日志附加到消息上
     updateMessage(assistMsgId, { thinkingLogs: [...currentThinkingLogs.value] })
@@ -587,9 +574,11 @@ async function runGenerate(msgId: string, userPrompt: string) {
         currentAction.value = extractActionFromLog(msg)
       },
       (plan) => {
-        editablePlan.value = normalizePlan(plan)
-        // 生成自然语言总结替换对话内容
-        updateMessage(msgId, { content: buildPlanSummary(plan), streaming: false })
+        // 如果 plan 为 null，可能是聊天回答，跳过行程更新
+        if (plan) {
+          editablePlan.value = normalizePlan(plan)
+          updateMessage(msgId, { content: '✅ 行程方案已生成！你可以在右侧画布中查看和编辑。', streaming: false })
+        }
       },
       (error) => {
         updateMessage(msgId, { content: `❌ 生成失败: ${error.message || '未知错误'}`, streaming: false })
@@ -600,7 +589,11 @@ async function runGenerate(msgId: string, userPrompt: string) {
           updateMessage(msgId, { toolCalls: JSON.stringify(stats.toolCalls) })
         }
       },
-      (cid) => { convId.value = cid }
+      (cid) => { convId.value = cid },
+      (chatAnswer) => {
+        // 收到聊天回答，直接显示
+        updateMessage(msgId, { content: chatAnswer, streaming: false })
+      }
     )
 
     // 生成完成后，将思考日志附加到消息上
@@ -643,10 +636,11 @@ async function runRefine(msgId: string, userPrompt: string) {
         currentAction.value = extractActionFromLog(msg)
       },
       (plan) => {
-        editablePlan.value = mergeRefinedPlan(originalPlan, normalizePlan(plan))
-        // 优化完成后生成自然语言回复
-        const summary = `好的！已根据你的要求优化了行程。修改后的方案共 **${editablePlan.value!.totalDays} 天**、${editablePlan.value!.dailyPlans.reduce((s, d) => s + d.items.length, 0)} 个地点。查看右侧画布即可看到更新后的行程。`
-        updateMessage(msgId, { content: summary, streaming: false })
+        // 如果 plan 为 null，可能是聊天回答，跳过行程更新
+        if (plan) {
+          editablePlan.value = mergeRefinedPlan(originalPlan, normalizePlan(plan))
+          updateMessage(msgId, { content: '✅ 行程已根据你的要求优化！你可以在右侧画布中查看更新后的行程。', streaming: false })
+        }
       },
       (error) => {
         updateMessage(msgId, { content: `❌ 优化失败: ${error.message || '未知错误'}`, streaming: false })
@@ -657,7 +651,11 @@ async function runRefine(msgId: string, userPrompt: string) {
           updateMessage(msgId, { toolCalls: JSON.stringify(stats.toolCalls) })
         }
       },
-      (cid) => { convId.value = cid }
+      (cid) => { convId.value = cid },
+      (chatAnswer) => {
+        // 收到聊天回答，直接显示
+        updateMessage(msgId, { content: chatAnswer, streaming: false })
+      }
     )
 
     // 优化完成后，将思考日志附加到消息上
@@ -805,6 +803,27 @@ onMounted(async () => {
     }
   } else if (queryItineraryId) {
     await loadDetailForEdit(queryItineraryId)
+    // 如果通过 itinerary 关联到了 convId，也加载对话历史
+    if (convId.value) {
+      console.log('[Workspace] loaded convId from itinerary, loading history:', convId.value)
+      const { title: convTitle } = await loadConversationHistory(convId.value)
+      if (convTitle && convTitle !== '新对话') {
+        hasAutoUpdatedTitle.value = true
+      }
+    }
+  }
+
+  // 兜底：如果行程已加载但对话消息为空，显示固定提示
+  if (editablePlan.value && messages.value.length === 0) {
+    console.log('[Workspace] plan loaded but no messages, showing placeholder')
+    messages.value.push({
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: '✅ 行程方案已生成！你可以在右侧画布中查看和编辑。',
+      time: new Date(),
+      toolCalls: '',
+      streaming: false,
+    })
   }
 
   // 如果已有行程或有历史对话，自动切换到对话模式

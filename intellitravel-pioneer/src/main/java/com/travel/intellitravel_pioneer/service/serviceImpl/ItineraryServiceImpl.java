@@ -1,6 +1,5 @@
 package com.travel.intellitravel_pioneer.service.serviceImpl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.travel.intellitravel_pioneer.exception.IntellitravelException;
 import com.travel.intellitravel_pioneer.po.ItineraryPO;
@@ -24,7 +23,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
 public class ItineraryServiceImpl implements ItineraryService {
@@ -71,45 +69,33 @@ public class ItineraryServiceImpl implements ItineraryService {
         }
         java.util.function.Consumer<String> wrappedNotifier = buildNotifier(ctx, toolNotifier);
 
-        // Chat intercept: keyword → fast pass; fallback → AI classifier
-        boolean isModify;
-        if (tripPlanningAiClient.isModifyLike(userPrompt)) {
-            isModify = true;
-        } else {
-            // Keyword didn't match — ask AI to classify
-            System.out.println(">>> [ItineraryServiceImpl] No modify keyword detected, asking AI to classify... <<<");
-            String aiIntent = tripPlanningAiClient.classifyIntent(userPrompt);
-            isModify = "MODIFY".equals(aiIntent);
-            System.out.println(">>> [ItineraryServiceImpl] AI classified as: " + aiIntent + " <<<");
-        }
-
-        if (!isModify) {
-            System.out.println(">>> [ItineraryServiceImpl] Chat confirmed, skipping modify flow <<<");
-            String planJson;
-            try {
-                planJson = objectMapper.writeValueAsString(currentPlan);
-            } catch (JsonProcessingException e) {
-                planJson = "{}";
-            }
-            String chatAnswer = tripPlanningAiClient.answerChatQuestion(userPrompt, planJson);
-            if (ctx.conversationId != null) {
-                try {
-                    conversationService.addMessage(token, ctx.conversationId,
-                            AgentMessageCreateRequest.builder()
-                                    .role("assistant")
-                                    .content(chatAnswer)
-                                    .build());
-                } catch (Exception ignored) {}
-            }
-            if (toolNotifier != null) {
-                toolNotifier.accept("THOUGHT:" + (chatAnswer.length() > 200 ? chatAnswer.substring(0, 200) + "..." : chatAnswer));
-            }
-            return new GenerationResult(currentPlan, null);
-        }
+        // 意图分类已移至 HttpTripPlanningAiClient.callLlmForRefine() 中由AI处理
+        // 这里直接调用 modifyItineraryWithStats，由底层AI判断是聊天还是修改
 
         try {
             GenerationResult result = tripPlanningAiClient.modifyItineraryWithStats(
-                    token, request, currentPlan, userPrompt, wrappedNotifier,conversationId);
+                    token, request, currentPlan, userPrompt, wrappedNotifier, conversationId);
+            
+            // 如果返回的plan为null，说明是聊天回答
+            if (result.getPlan() == null && result.getChatAnswer() != null) {
+                // 保存聊天回答到对话
+                if (ctx.conversationId != null) {
+                    try {
+                        conversationService.addMessage(token, ctx.conversationId,
+                                AgentMessageCreateRequest.builder()
+                                        .role("assistant")
+                                        .content(result.getChatAnswer())
+                                        .build());
+                    } catch (Exception ignored) {}
+                }
+                if (toolNotifier != null) {
+                    toolNotifier.accept("THOUGHT:" + (result.getChatAnswer().length() > 200 
+                        ? result.getChatAnswer().substring(0, 200) + "..." : result.getChatAnswer()));
+                }
+                result.setConversationId(ctx.conversationId);
+                return result;
+            }
+            
             finalizeConversation(ctx, token, result.getPlan(), true);
             result.setConversationId(ctx.conversationId);
             return result;
@@ -254,37 +240,17 @@ public class ItineraryServiceImpl implements ItineraryService {
     }
 
     private String buildAiSummary(ItineraryPlan plan, ConversationContext ctx, boolean isModify) {
+        // 计划和对话分离：对话区只显示固定提示，行程细节在右侧画布查看
         StringBuilder sb = new StringBuilder();
-        sb.append(isModify ? "已根据您的要求修改行程。" : "已为您生成旅行方案。");
-
+        if (isModify) {
+            sb.append("✅ 行程已根据你的要求优化！你可以在右侧画布中查看更新后的行程。");
+        } else {
+            sb.append("✅ 行程方案已生成！你可以在右侧画布中查看和编辑。");
+        }
         if (ctx.thoughtCount > 0) {
-            sb.append(" 本次规划共进行 ").append(ctx.thoughtCount)
-                    .append(" 轮思考，调用 ").append(ctx.toolCount).append(" 次工具查询。");
+            sb.append("（本次规划共进行 ").append(ctx.thoughtCount)
+                    .append(" 轮思考，调用 ").append(ctx.toolCount).append(" 次工具查询）");
         }
-
-        if (plan != null) {
-            sb.append("\n\n");
-            var dailyPlans = plan.getDailyPlans();
-            if (dailyPlans != null && !dailyPlans.isEmpty()) {
-                sb.append(" 行程概览（").append(dailyPlans.size()).append("天）：\n");
-                for (var day : dailyPlans) {
-                    sb.append("   Day ").append(day.getDayNumber()).append("：");
-                    if (day.getItems() != null && !day.getItems().isEmpty()) {
-                        String names = day.getItems().stream()
-                                .map(i -> i.getName())
-                                .filter(n -> n != null)
-                                .limit(4)
-                                .collect(Collectors.joining(" → "));
-                        sb.append(names);
-                    }
-                    sb.append("\n");
-                }
-            }
-            if (plan.getEstimatedCost() != null && plan.getEstimatedCost() > 0) {
-                sb.append("\n 预估费用：¥").append(plan.getEstimatedCost()).append("/人");
-            }
-        }
-
         return sb.toString();
     }
 
