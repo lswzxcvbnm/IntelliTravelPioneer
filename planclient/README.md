@@ -1,93 +1,347 @@
-# PlanClient
+# PlanClient - 前端应用
 
+> 基于Vue 3 + TypeScript + Element Plus的AI旅行规划前端应用，提供智能行程规划、实时对话、行程画布等功能。
 
+## 项目概述
 
-## Getting started
+PlanClient是IntelliTravel AI旅行规划系统的前端应用，采用Vue 3 Composition API，支持SSE实时通信、拖拽编辑、多轮对话等现代化交互体验。
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### 核心特性
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- **AI行程规划**: 自然语言输入，智能生成行程
+- **实时对话**: 支持多轮对话优化行程
+- **行程画布**: 时间线视图，支持拖拽排序
+- **SSE实时通信**: 实时显示Agent执行过程
+- **响应式设计**: 支持多端适配
+- **组件化架构**: 高度可复用的组件设计
 
-## Add your files
+## 技术栈
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Vue | 3.5.25 | 前端框架 |
+| TypeScript | 5.9.3 | 编程语言 |
+| Element Plus | 2.13.2 | UI组件库 |
+| Vite | 7.3.1 | 构建工具 |
+| Pinia | 3.0.4 | 状态管理 |
+| Vue Router | 5.0.2 | 路由管理 |
+| Axios | 1.13.5 | HTTP客户端 |
+| Vue TSC | 3.1.5 | TypeScript编译 |
+
+## 项目结构
 
 ```
-cd existing_repo
-git remote add origin https://git.nju.edu.cn/Auroralty/planclient.git
-git branch -M main
-git push -uf origin main
+planclient/
+├── src/
+│   ├── api/                  # API接口封装
+│   ├── components/           # 通用组件
+│   ├── composables/          # 组合式函数
+│   │   ├── useBackHandler.ts    # 返回处理
+│   │   ├── useConversation.ts   # 对话管理
+│   │   ├── useDragDrop.ts      # 拖拽功能
+│   │   └── useItinerary.ts     # 行程管理
+│   ├── config/               # 配置文件
+│   │   └── api.ts              # API基础URL配置
+│   ├── constants/            # 常量定义（工具名称/图标映射）
+│   ├── router/               # 路由配置
+│   ├── stores/               # Pinia状态管理
+│   ├── types/                # TypeScript类型定义
+│   ├── utils/                # 工具函数
+│   ├── views/                # 页面组件
+│   │   ├── battle/             # 行程仓库
+│   │   ├── conversation/       # 对话历史列表
+│   │   ├── user/               # 用户登录/注册
+│   │   └── workspace/          # 工作区（核心页面集合）
+│   │       ├── Workspace.vue         # AI行程规划工作台
+│   │       ├── ItineraryCanvas.vue   # 行程画布（时间线+拖拽编辑）
+│   │       ├── ItineraryCard.vue     # 行程卡片
+│   │       ├── FormInput.vue         # 结构化表单输入
+│   │       ├── ChatInput.vue         # 自然语言输入
+│   │       └── ToolCallCard.vue      # 工具调用展示
+│   ├── App.vue               # 根组件
+│   ├── main.ts               # 应用入口
+│   ├── style.css             # 全局样式
+│   └── vite-env.d.ts         # Vite类型声明
+├── public/                   # 静态资源
+├── index.html                # HTML入口
+├── package.json              # 项目配置
+├── tsconfig.json             # TypeScript配置
+├── vite.config.ts            # Vite配置
+└── README.md
 ```
 
-## Integrate with your tools
+## 安装要求
 
-* [Set up project integrations](https://git.nju.edu.cn/Auroralty/planclient/-/settings/integrations)
+- **Node.js**: 18+
+- **npm**: 9+ 或 **yarn**: 1.22+ 或 **pnpm**: 8+
+- **操作系统**: Windows/Linux/macOS
 
-## Collaborate with your team
+## 开发环境
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+### 安装依赖
 
-## Test and Deploy
+```bash
+# 使用npm
+npm install
 
-Use the built-in continuous integration in GitLab.
+# 使用yarn
+yarn install
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+# 使用pnpm
+pnpm install
+```
 
-***
+### 启动开发服务器
 
-# Editing this README
+```bash
+# 使用npm
+npm run dev
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+# 使用yarn
+yarn dev
 
-## Suggestions for a good README
+# 使用pnpm
+pnpm dev
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+开发服务器将在 http://localhost:5173 启动。
 
-## Name
-Choose a self-explaining name for your project.
+### 环境配置
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+API基础URL在 `src/config/api.ts` 中配置：
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```typescript
+// 开发环境
+export const API_BASE_URL = 'http://localhost:8080'
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+// 生产环境（根据需要修改）
+// export const API_BASE_URL = 'https://your-api-domain.com'
+```
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## 构建与部署
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### 生产环境构建
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```bash
+# 使用npm
+npm run build
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+# 使用yarn
+yarn build
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+# 使用pnpm
+pnpm build
+```
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+构建产物将输出到 `dist/` 目录。
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### 预览构建结果
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+```bash
+# 使用npm
+npm run preview
 
-## License
-For open source projects, say how it is licensed.
+# 使用yarn
+yarn preview
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+# 使用pnpm
+pnpm preview
+```
+
+### 部署方式
+
+#### 1. 静态服务器部署
+
+将 `dist/` 目录部署到任何静态文件服务器（Nginx、Apache、Caddy等）。
+
+**Nginx配置示例**：
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    root /path/to/dist;
+    index index.html;
+
+    # Vue Router history模式支持
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API代理
+    location /api/ {
+        proxy_pass http://localhost:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+#### 2. Docker部署
+
+```dockerfile
+# 构建阶段
+FROM node:18-alpine as build-stage
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+# 生产阶段
+FROM nginx:alpine as production-stage
+COPY --from=build-stage /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+#### 3. Vercel/Netlify部署
+
+项目支持零配置部署到Vercel或Netlify：
+
+1. Fork项目到GitHub
+2. 在Vercel/Netlify中导入项目
+3. 设置构建命令：`npm run build`
+4. 设置输出目录：`dist`
+
+## 开发指南
+
+### 代码规范
+
+项目使用ESLint + Prettier进行代码格式化：
+
+```bash
+# 检查代码规范
+npm run lint
+
+# 自动修复
+npm run lint:fix
+```
+
+### TypeScript
+
+项目使用TypeScript严格模式，类型定义在 `src/types/` 目录。
+
+### 组件开发
+
+- 使用Vue 3 Composition API
+- 组件命名采用PascalCase
+- 组合式函数以`use`开头
+- 工具函数放在`src/utils/`
+
+### 状态管理
+
+使用Pinia进行状态管理，Store定义在 `src/stores/` 目录。
+
+### 路由配置
+
+路由配置在 `src/router/` 目录，支持：
+
+- 路由守卫（认证检查）
+- 路由懒加载
+- 嵌套路由
+
+## 核心功能
+
+### 1. AI行程规划
+
+- **自然语言输入解析**：用户通过自然语言描述旅行需求
+- **结构化表单输入**：通过表单精确设置目的地、天数、兴趣等
+- **意图识别**：前端将用户输入发送到后端，后端通过双通道架构识别意图：
+  - 关键词快速匹配（0延迟）
+  - AI分类器兜底（处理自然表达）
+  - 意图类型：GENERATE（生成行程）、CHAT（聊天）
+- **SSE实时进度显示**：实时显示Agent执行过程
+- **行程画布实时更新**：行程生成后实时更新画布
+
+### 2. 实时对话
+
+- **多轮对话支持**：持续对话优化行程
+- **消息历史记录**：保存所有对话记录，支持搜索
+- **智能意图识别**：
+  - 前端将用户消息发送到后端 `/api/itinerary/modify/stream` 端点
+  - 后端通过双通道架构识别意图：
+    1. 关键词快速匹配（0延迟）
+    2. AI分类器兜底（处理自然表达）
+  - 意图类型：CHAT（聊天）、MODIFY（修改行程）
+  - 前端根据意图类型展示不同响应
+- **自然语言回复**：AI回复为结构化自然语言，隐藏原始思考过程
+
+### 3. 行程画布
+
+- 时间线视图
+- 拖拽排序
+- 点击展开详情
+- 一键跳转地图
+
+### 4. 用户系统
+
+- 用户注册/登录
+- 个人信息管理
+- 行程收藏/分享
+
+## 浏览器支持
+
+- Chrome 90+
+- Firefox 88+
+- Safari 14+
+- Edge 90+
+
+## 故障排除
+
+### 常见问题
+
+1. **依赖安装失败**
+   ```bash
+   # 清除缓存
+   npm cache clean --force
+   rm -rf node_modules package-lock.json
+   npm install
+   ```
+
+2. **开发服务器启动失败**
+   - 检查端口5173是否被占用
+   - 检查Node.js版本是否符合要求
+
+3. **API请求失败**
+   - 检查后端服务是否运行
+   - 验证`src/config/api.ts`中的API地址
+
+4. **构建失败**
+   - 检查TypeScript类型错误
+   - 运行`npm run type-check`检查类型
+
+## 性能优化
+
+- 路由懒加载
+- 组件异步加载
+- 图片懒加载
+- 代码分割
+- Gzip压缩
+
+## 测试
+
+```bash
+# 运行单元测试
+npm run test
+
+# 运行端到端测试
+npm run test:e2e
+```
+
+## 贡献指南
+
+1. Fork项目
+2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 创建Pull Request
+
+## 许可证
+
+本项目仅供学习交流使用
+
+---
+
+> 本项目是IntelliTravel AI旅行规划系统的前端应用，基于Vue 3 + TypeScript构建，提供现代化的用户交互体验。

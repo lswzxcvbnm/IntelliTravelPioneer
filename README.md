@@ -59,13 +59,18 @@ agent-project/
 ├── intellitravel-pioneer/        # 后端Spring Boot项目
 │   ├── src/main/java/            # Java源码
 │   │   ├── controller/           # REST控制器
-│   │   │   ├── AmApiController.java         # 地图API
+│   │   │   ├── AmapController.java          # 地图API
+│   │   │   ├── CapsuleController.java       # 胶囊管理
+│   │   │   ├── CommunityController.java     # 社区管理
 │   │   │   ├── ConversationController.java  # 对话管理
 │   │   │   ├── ItineraryController.java     # 行程规划（SSE）
+│   │   │   ├── RealTimeTripController.java  # 实时行程
 │   │   │   ├── SkillController.java         # 技能管理
-│   │   │   ├── ToolController.java          # 工具管理
-│   │   │   └── UserController.java          # 用户管理
-│   │   ├── service/              # 业务逻辑层
+│   │   │   ├── SocialController.java        # 社交管理
+│   │   │   ├── ToolsController.java         # 工具管理
+│   │   │   ├── UserController.java          # 用户管理
+│   │   │   └── UserHealthController.java    # 用户健康
+│   │   ├── service/              # 业务逻辑层（包含多个服务类）
 │   │   │   ├── ai/               # AI客户端（Agent Loop + Prompt + 意图识别）
 │   │   │   │   ├── TripPlanningAiClient.java       # AI客户端接口
 │   │   │   │   └── HttpTripPlanningAiClient.java   # 实现（含全部Prompt模板）
@@ -75,9 +80,23 @@ agent-project/
 │   │   │   ├── EntityTracker.java         # 实体追踪
 │   │   │   ├── ActionTracker.java         # 操作历史
 │   │   │   ├── MemoryManager.java         # 工作记忆
-│   │   │   └── ConversationContextManager.java  # 上下文管理（滑动窗口+摘要压缩）
+│   │   │   ├── ConversationContextManager.java  # 上下文管理（滑动窗口+摘要压缩）
+│   │   │   ├── AmapService.java           # 地图服务
+│   │   │   ├── CapsuleService.java        # 胶囊服务
+│   │   │   ├── CommunityService.java      # 社区服务
+│   │   │   ├── ConversationService.java   # 对话服务
+│   │   │   ├── ImageService.java          # 图片服务
+│   │   │   ├── ItineraryService.java      # 行程服务
+│   │   │   ├── RealTimeTripService.java   # 实时行程服务
+│   │   │   ├── SkillService.java          # 技能服务
+│   │   │   ├── SocialService.java         # 社交服务
+│   │   │   ├── ToolManagementService.java # 工具管理服务
+│   │   │   ├── TripSummaryService.java    # 行程摘要服务
+│   │   │   ├── UserHealthService.java     # 用户健康服务
+│   │   │   └── UserService.java           # 用户服务
 │   │   ├── repository/           # 数据访问层
-│   │   ├── entity/               # 实体类
+│   │   ├── po/                   # 持久化对象
+│   │   ├── vo/                   # 视图对象
 │   │   ├── dto/                  # 数据传输对象
 │   │   ├── configure/            # 配置类
 │   │   └── exception/            # 异常处理
@@ -153,17 +172,22 @@ Phase 3: VERIFY（审核阶段）
 ```
 用户消息（如"我想多玩一天""把故宫换成天坛"）
   │
-  ├── isModifyLike() 关键词快速匹配
-  │     ├── 命中 → 直接进入 Agent Loop
-  │     └── 未命中 → classifyIntent() AI分类器兜底
-  │                      ├── MODIFY → 进入 Agent Loop
-  │                      └── CHAT  → 聊天回答，不改行程
+  ├── 第一层：关键词快速匹配（IntentStateMachine.detectIntent）
+  │     ├── 52个修改关键词（"改成""删除""增加"等）
+  │     ├── 0延迟，立即响应
+  │     └── 匹配成功 → 直接返回意图
   │
-  ├── detectActionType() 识别操作类型
-  │     ├── UPDATE_DAYS → 预更新天数（支持"多一天"等自然表达）
-  │     ├── DELETE       → 删除指定条目
-  │     ├── ADD / MODIFY → 新增或替换
-  │     └── UNKNOWN      → Agent自行判断
+  ├── 第二层：AI分类器兜底（HttpTripPlanningAiClient.classifyIntent）
+  │     ├── 轻量级LLM调用（max_tokens=10, temperature=0）
+  │     ├── 处理自然表达（"多玩一天""想换个地方"等）
+  │     └── 分类结果：CHAT 或 MODIFY
+  │
+  ├── 操作类型识别（detectActionType）
+  │     ├── DELETE：删除条目（"删除""去掉""移除""删掉"）
+  │     ├── ADD：新增条目（"增加""添加""新增"）
+  │     ├── UPDATE_DAYS：更新天数（"改为5天""多玩一天""延长"）
+  │     ├── MODIFY：修改条目（"改成""换成""修改""变为"）
+  │     └── UNKNOWN：未知操作（Agent自行判断）
   │
   └── Agent Loop（修改专用 Prompt）
         ├── 天数变更：自动搜索填充新景点
@@ -213,12 +237,46 @@ Phase 3: VERIFY（审核阶段）
 
 ### 6. 智能意图识别
 
-双通道架构确保准确性：
+双通道架构确保准确性和响应速度：
 
-| 通道 | 机制 | 场景 |
-|------|------|------|
-| 关键词匹配 | `isModifyLike()` 52个修改关键词 | 明确指令（"改成""删除""增加"等），0延迟 |
-| AI分类 | `classifyIntent()` 轻量LLM调用 | 自然表达（"多玩一天""想换个地方"等）|
+#### 第一层：关键词快速匹配
+- **组件**：`IntentStateMachine.detectIntent()`
+- **机制**：52个修改关键词（"改成""删除""增加"等）
+- **性能**：0延迟，立即响应
+- **场景**：明确指令，如"把故宫换成天坛"、"删掉第二天"
+
+#### 第二层：AI分类器兜底
+- **组件**：`HttpTripPlanningAiClient.classifyIntent()`
+- **机制**：轻量级LLM调用（max_tokens=10, temperature=0）
+- **性能**：快速分类，处理自然表达
+- **场景**：自然表达，如"多玩一天"、"想换个地方"
+
+#### 意图类型
+| 意图 | 说明 | 触发条件 |
+|------|------|----------|
+| `PLAN_START` | 开始规划 | 用户请求生成行程 |
+| `PLAN_MODIFY` | 修改行程 | 用户要求修改现有行程 |
+| `PLAN_QUERY` | 查询信息 | 用户询问行程相关信息 |
+| `PLAN_CONFIRM` | 确认操作 | 用户确认当前操作 |
+| `PLAN_COMPLETE` | 完成规划 | 用户表示行程已完成 |
+| `PLAN_REPEAT_LAST` | 重复上一次 | 用户要求重复上一次操作 |
+| `PLAN_SHOW_HISTORY` | 显示历史 | 用户查看操作历史 |
+
+#### 状态机管理
+- **状态类型**：`IDLE`、`GATHERING_INFO`、`PLANNING`、`MODIFYING`、`REVIEWING`
+- **状态转换**：根据意图自动转换状态
+- **上下文保持**：跨消息保持对话上下文
+
+#### AI分类器优化
+1. **修改意图识别**：
+   - 明确指令："把故宫换成天坛"、"删掉第二天"
+   - 自然表达："多玩一天"、"想换个地方"
+   - 关键词："推荐"≠MODIFY，除非说"把XX加到行程中"
+
+2. **生成意图识别**：
+   - 正则快速判断：城市名 + 时间信息
+   - AI兜底：处理模糊请求
+   - 默认策略：无法确定时返回CHAT，避免意外修改
 
 ### 7. 技能与工具系统
 
@@ -333,7 +391,7 @@ npm run dev
 ## 项目状态
 
 **当前版本**: 活跃开发中
-**最后更新**: 2026年6月14日
+**最后更新**: 2026年6月18日
 **主要方向**: Agent架构优化、意图识别增强、前端体验提升
 
 ## 许可证
