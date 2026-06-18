@@ -254,37 +254,17 @@ public class ItineraryServiceImpl implements ItineraryService {
     }
 
     private String buildAiSummary(ItineraryPlan plan, ConversationContext ctx, boolean isModify) {
+        // 计划和对话分离：对话区只显示固定提示，行程细节在右侧画布查看
         StringBuilder sb = new StringBuilder();
-        sb.append(isModify ? "已根据您的要求修改行程。" : "已为您生成旅行方案。");
-
+        if (isModify) {
+            sb.append("✅ 行程已根据你的要求优化！你可以在右侧画布中查看更新后的行程。");
+        } else {
+            sb.append("✅ 行程方案已生成！你可以在右侧画布中查看和编辑。");
+        }
         if (ctx.thoughtCount > 0) {
-            sb.append(" 本次规划共进行 ").append(ctx.thoughtCount)
-                    .append(" 轮思考，调用 ").append(ctx.toolCount).append(" 次工具查询。");
+            sb.append("（本次规划共进行 ").append(ctx.thoughtCount)
+                    .append(" 轮思考，调用 ").append(ctx.toolCount).append(" 次工具查询）");
         }
-
-        if (plan != null) {
-            sb.append("\n\n");
-            var dailyPlans = plan.getDailyPlans();
-            if (dailyPlans != null && !dailyPlans.isEmpty()) {
-                sb.append(" 行程概览（").append(dailyPlans.size()).append("天）：\n");
-                for (var day : dailyPlans) {
-                    sb.append("   Day ").append(day.getDayNumber()).append("：");
-                    if (day.getItems() != null && !day.getItems().isEmpty()) {
-                        String names = day.getItems().stream()
-                                .map(i -> i.getName())
-                                .filter(n -> n != null)
-                                .limit(4)
-                                .collect(Collectors.joining(" → "));
-                        sb.append(names);
-                    }
-                    sb.append("\n");
-                }
-            }
-            if (plan.getEstimatedCost() != null && plan.getEstimatedCost() > 0) {
-                sb.append("\n 预估费用：¥").append(plan.getEstimatedCost()).append("/人");
-            }
-        }
-
         return sb.toString();
     }
 

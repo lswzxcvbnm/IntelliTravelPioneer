@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../config/api'
+import { getAuthToken } from '../utils/authToken'
 
 export interface ChatMessage {
     role: 'user' | 'assistant'
@@ -22,14 +23,14 @@ export async function streamChat(
     conversationId: string | null,
     callbacks: ChatCallbacks
 ): Promise<void> {
-    const token = localStorage.getItem('token') || ''
+    const token = getAuthToken()
     const url = `${API_BASE_URL}/api/ai/chat/stream`
 
     const resp = await fetch(url, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            'token': token
         },
         body: JSON.stringify({ message, conversationId })
     })
@@ -59,10 +60,10 @@ export async function streamChat(
         buffer = lines.pop() || ''
 
         for (const line of lines) {
-            if (line.startsWith('event: ')) {
-                eventName = line.substring(7).trim()
-            } else if (line.startsWith('data: ')) {
-                const data = line.substring(6)
+            if (line.startsWith('event:')) {
+                eventName = line.substring(6).trim()
+            } else if (line.startsWith('data:')) {
+                const data = line.substring(5).replace(/^\s/, '')
                 if (eventName === 'token') {
                     callbacks.onToken?.(data)
                 } else if (eventName === 'done') {

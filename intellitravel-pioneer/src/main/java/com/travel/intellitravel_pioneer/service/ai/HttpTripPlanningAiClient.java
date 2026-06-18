@@ -1197,7 +1197,6 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         }
 
         int turn = 0;
-        int maxTurns = 30; // safety limit to prevent infinite loops
         String lastToolName = "";
         String lastToolArgs = "";
         int consecutiveSameCalls = 0;
@@ -1207,10 +1206,6 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         final int recentArgsMaxSize = 20;
         while (true) {
             turn++;
-            if (turn > maxTurns) {
-                System.err.println("Agent loop reached max safe turns (" + maxTurns + "), stopping to prevent infinite loop");
-                throw new IntellitravelException("Agent 思考轮次过多，请稍后重试或简化您的需求");
-            }
             System.out.println("Agent turn " + turn);
             JsonNode response = callLlmChat(messages, tools);
             accumulateUsageFromResponse(response, stats);
@@ -1766,6 +1761,18 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     }
 
     /**
+     * Quick non-AI check: does the message look like a generate-plan request?
+     * Used on first message (before any itinerary exists) to decide chat vs generate.
+     */
+    @Override
+    public boolean isGenerateLike(String text) {
+        if (text == null) return false;
+        return text.contains("规划") || text.contains("安排") || text.contains("生成") ||
+                text.contains("设计") || text.contains("做一份") || text.contains("帮我做") ||
+                text.contains("定制") || text.contains("弄一个") || text.contains("来一份");
+    }
+
+    /**
      * Use AI to quickly classify user intent: CHAT or MODIFY.
      * Very lightweight call (max_tokens=10, temperature=0).
      * Used as fallback when keyword matching fails.
@@ -1827,11 +1834,14 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             ArrayNode msgs = body.putArray("messages");
             ObjectNode sysMsg = objectMapper.createObjectNode();
             sysMsg.put("role", "system");
-            sysMsg.put("content", "你是一个智能旅行助手。用户正在查看一份旅行行程，但只是在咨询信息、征求建议或讨论行程方向，而非要求立即修改行程。\n\n"
+            sysMsg.put("content", "你是一个智能旅行助手。用户正在查看一份已经生成好的旅行行程，这是在已有行程基础上的延续对话，不是新对话。\n\n"
                     + "【当前行程上下文】\n" + currentPlanJson + "\n\n"
-                    + "请直接回答用户的问题或建议，200字以内。回答时可以参考当前行程的内容。如果用户说\"在XX的基础上改进\"，"
-                    + "请基于当前行程给出具体的改进建议，但不要直接替换行程内容。"
-                    + "回答末尾可以提醒：如需将建议应用到行程中，请明确说明具体如何修改。");
+                    + "重要规则：\n"
+                    + "1. 不要问候、不要询问用户偏好，直接回答用户的问题或建议\n"
+                    + "2. 200字以内，简洁有力\n"
+                    + "3. 回答时可以参考当前行程的内容\n"
+                    + "4. 如果用户说\"在XX的基础上改进\"，请基于当前行程给出具体的改进建议，但不要直接替换行程内容\n"
+                    + "5. 回答末尾可以提醒：如需将建议应用到行程中，请明确说明具体如何修改");
             msgs.add(sysMsg);
 
             ObjectNode userMsg = objectMapper.createObjectNode();

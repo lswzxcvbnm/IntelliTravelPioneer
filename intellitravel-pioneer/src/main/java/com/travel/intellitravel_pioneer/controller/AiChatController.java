@@ -15,9 +15,8 @@ public class AiChatController {
     private AiChatService aiChatService;
 
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter chatStream(@RequestHeader("Authorization") String token,
+    public SseEmitter chatStream(@RequestHeader("token") String token,
                                   @RequestBody AiChatRequest request) {
-        String t = token.startsWith("Bearer ") ? token.substring(7) : token;
-        return aiChatService.chatStream(t, request.getMessage(), request.getConversationId());
+        return aiChatService.chatStream(token, request.getMessage(), request.getConversationId());
     }
 }

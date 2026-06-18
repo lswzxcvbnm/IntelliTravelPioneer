@@ -25,6 +25,14 @@ public interface TripPlanningAiClient {
         return new GenerationResult(plan, null);
     }
 
+    /** Check if message contains explicit generate/plan keywords for new itinerary creation */
+    default boolean isGenerateLike(String text) {
+        if (text == null) return false;
+        return text.contains("规划") || text.contains("安排") || text.contains("生成") ||
+                text.contains("设计") || text.contains("做一份") || text.contains("帮我做") ||
+                text.contains("定制") || text.contains("弄一个") || text.contains("来一份");
+    }
+
     /** Check if message contains explicit modify keywords */
     default boolean isModifyLike(String text) {
         if (text == null) return false;
