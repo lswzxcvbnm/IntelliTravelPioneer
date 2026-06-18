@@ -416,6 +416,7 @@ public class ItineraryServiceImpl implements ItineraryService {
         ItineraryPO itineraryPO = ItineraryPO.builder()
                 .id(UUID.randomUUID().toString())
                 .userId(userId)
+                .conversationId(request.getConversationId())
                 .title(request.getTitle())
                 .plan(plan)
                 .stats(request.getStats())
@@ -457,6 +458,9 @@ public class ItineraryServiceImpl implements ItineraryService {
 
         existingItinerary.setTitle(request.getTitle());
         existingItinerary.setPlan(plan);
+        if (request.getConversationId() != null) {
+            existingItinerary.setConversationId(request.getConversationId());
+        }
         if (request.getStats() != null) {
             existingItinerary.setStats(request.getStats());
         }
@@ -484,6 +488,7 @@ public class ItineraryServiceImpl implements ItineraryService {
         return ItineraryVO.builder()
                 .id(itinerary.getId())
                 .userId(itinerary.getUserId())
+                .conversationId(itinerary.getConversationId())
                 .title(itinerary.getTitle())
                 .destination(itinerary.getPlan() == null ? null : itinerary.getPlan().getDestination())
                 .plan(itinerary.getPlan())

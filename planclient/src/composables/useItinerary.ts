@@ -116,11 +116,13 @@ export function useItinerary() {
       if (itineraryId.value) {
         await updateItinerary(itineraryId.value, {
           ...editablePlan.value,
+          conversationId: convId.value || undefined,
           destination: editablePlan.value.destination || '',
         })
         return true
       } else {
         const res = await saveItinerary({
+          conversationId: convId.value || undefined,
           title: editablePlan.value.title,
           estimatedCost: editablePlan.value.estimatedCost,
           totalDays: editablePlan.value.totalDays,
@@ -149,13 +151,18 @@ export function useItinerary() {
         editablePlan.value = normalizePlan(r.data.data.plan)
         itineraryId.value = r.data.data.id
         
-        // 获取关联的对话ID
-        try {
-          const convRes = await getConversationByItineraryId(id)
-          if (convRes.data?.code === '200' && convRes.data?.data?.id) {
-            convId.value = convRes.data.data.id
-          }
-        } catch { /* ignore */ }
+        // 优先使用行程中存储的 conversationId（双向绑定）
+        if (r.data.data.conversationId) {
+          convId.value = r.data.data.conversationId
+        } else {
+          // 降级：通过反向查询获取关联的对话ID
+          try {
+            const convRes = await getConversationByItineraryId(id)
+            if (convRes.data?.code === '200' && convRes.data?.data?.id) {
+              convId.value = convRes.data.data.id
+            }
+          } catch { /* ignore */ }
+        }
       }
     } catch { /* ignore */ }
   }

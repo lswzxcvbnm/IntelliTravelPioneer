@@ -380,7 +380,8 @@ function parseUserRequest(text: string): ItineraryRequest {
     budgetLevel: extractBudget(text),
     interests: extractInterests(text),
     additionalNotes: text,
-  }
+    userPrompt: text,  // 关键：传递原始用户输入给后端意图分类器
+  } as ItineraryRequest
 }
 
 function buildRequestFromPlan(): ItineraryRequest {
@@ -689,6 +690,7 @@ async function autoSaveAndLinkItinerary() {
 
   try {
     const itineraryData = {
+      conversationId: convId.value || undefined,
       title: editablePlan.value.title,
       estimatedCost: editablePlan.value.estimatedCost,
       totalDays: editablePlan.value.totalDays,

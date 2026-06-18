@@ -15,6 +15,9 @@ import java.util.List;
 @Builder
 @Getter
 public class ItinerarySaveRequest {
+    @JsonProperty("conversationId")
+    private String conversationId;
+
     @JsonProperty("title")
     private String title;
 

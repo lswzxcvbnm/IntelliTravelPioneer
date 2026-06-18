@@ -16,6 +16,7 @@ import lombok.Builder;
 public class ItineraryVO {
     private String id;
     private String userId;
+    private String conversationId;
     private String title;
     private String destination;
     private ItineraryPlan plan;

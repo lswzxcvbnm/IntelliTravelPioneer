@@ -31,6 +31,9 @@ public class ItineraryPO {
     @Column(name = "user_id", length = 36, nullable = false)
     private String userId;
 
+    @Column(name = "conversation_id", length = 36)
+    private String conversationId;
+
     @Column(name = "title", length = 255)
     private String title;
 

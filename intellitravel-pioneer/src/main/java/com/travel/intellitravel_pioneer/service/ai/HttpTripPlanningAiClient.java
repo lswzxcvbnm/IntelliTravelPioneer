@@ -1847,6 +1847,16 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
      * Very lightweight call (max_tokens=10, temperature=0).
      */
     public String classifyGenerateIntent(String userMessage) {
+        // ========== 第一层：正则快速判断 ==========
+        // 匹配明确的旅行规划请求：有目的地 + 有时间
+        // 模式：目的地（城市名）+ 时间（X天/X日/几天/周末等）
+        String quickResult = quickClassifyByRegex(userMessage);
+        if (quickResult != null) {
+            System.out.println(">>> classifyGenerateIntent regex result: " + quickResult + " for: " + userMessage);
+            return quickResult;
+        }
+
+        // ========== 第二层：LLM分类（用于正则无法判断的模糊情况） ==========
         try {
             ObjectNode body = objectMapper.createObjectNode();
             body.put("model", llmModel);
@@ -1856,33 +1866,19 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             ArrayNode msgs = body.putArray("messages");
             ObjectNode sysMsg = objectMapper.createObjectNode();
             sysMsg.put("role", "system");
-            sysMsg.put("content", "你是一个意图分类器。只回复一个词：CHAT 或 GENERATE。\n\n"
-                    + "GENERATE = 用户想要创建/规划一次旅行行程。特征：\n"
-                    + "- 明确提到目的地（城市/景点/国家）\n"
-                    + "- 提到出行时间（几天、几月、周末等）\n"
-                    + "- 要求制定/规划/安排行程\n"
-                    + "- 询问如何规划某地旅行\n"
-                    + "- 包含出发地+目的地+时间的组合\n\n"
-                    + "CHAT = 其余一切，包括：\n"
-                    + "- 一般性问题（\"北京有什么好吃的\"、\"日本签证怎么办\"）\n"
-                    + "- 闲聊（\"你好\"、\"谢谢\"）\n"
-                    + "- 旅行相关知识咨询（\"去高原要注意什么\"）\n"
-                    + "- 模糊的意向表达（\"我想去旅行\"但没有具体信息）\n"
-                    + "- 对已有行程的讨论（不涉及创建新行程）\n\n"
-                    + "注意：\n"
-                    + "- 只有用户表达了明确的行程创建意图才算 GENERATE\n"
-                    + "- 单纯询问信息不算 GENERATE\n"
-                    + "- 如果不确定，默认 CHAT");
+            sysMsg.put("content", "你是意图分类器。判断用户是否要规划旅行行程。只回复GENERATE或CHAT。");
             msgs.add(sysMsg);
 
             ObjectNode userMsg = objectMapper.createObjectNode();
             userMsg.put("role", "user");
-            userMsg.put("content", "用户消息：\"" + userMessage + "\"\n\n意图：");
+            userMsg.put("content", "判断以下用户消息的意图，只回复GENERATE或CHAT：\n\n" + userMessage);
             msgs.add(userMsg);
 
             String jsonBody = objectMapper.writeValueAsString(body);
             String requestUrl = llmBaseUrl + llmChatPath;
 
+            System.out.println(">>> classifyGenerateIntent LLM fallback for: " + userMessage);
+            
             String response = RestClient.create()
                     .post()
                     .uri(requestUrl)
@@ -1894,15 +1890,61 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             JsonNode root = objectMapper.readTree(response);
             String content = root.path("choices").get(0).path("message").path("content").asText("").trim().toUpperCase();
+            System.out.println(">>> classifyGenerateIntent LLM content: '" + content + "'");
+            
             if (content.contains("GENERATE")) return "GENERATE";
             if (content.contains("CHAT")) return "CHAT";
-            // Ambiguous — safer to treat as chat to avoid expensive generation
             System.out.println(">>> Generate intent classification ambiguous: '" + content + "', defaulting to CHAT <<<");
             return "CHAT";
         } catch (Exception e) {
             System.err.println("Generate intent classification failed, defaulting to CHAT: " + e.getMessage());
             return "CHAT";
         }
+    }
+
+    /**
+     * 正则快速分类：检测明确的旅行规划请求。
+     * 规则：包含目的地（中国城市名）+ 时间信息（X天/X日/几天）→ GENERATE
+     * 其他情况返回null，交给LLM判断。
+     */
+    private String quickClassifyByRegex(String userMessage) {
+        // 中国主要城市列表
+        String cities = "北京|上海|南京|杭州|成都|西安|重庆|武汉|长沙|苏州|天津|青岛|大连|宁波|厦门|深圳|广州|佛山|三亚|昆明|大理|丽江|桂林|拉萨|哈尔滨|沈阳|济南|福州|合肥|郑州|太原|石家庄|贵阳|南昌|珠海|东莞|无锡|常州|温州|泉州|烟台|威海|洛阳|开封|敦煌|九寨沟|张家界|黄山|泰山|华山|峨眉山|乌镇|周庄|西塘|凤凰|丽江|香格里拉|北海|海口";
+        
+        boolean hasDestination = false;
+        boolean hasTime = false;
+        
+        // 检查是否包含目的地
+        for (String city : cities.split("\\|")) {
+            if (userMessage.contains(city)) {
+                hasDestination = true;
+                break;
+            }
+        }
+        
+        // 检查是否有时间信息
+        hasTime = userMessage.matches(".*\\d+\\s*[天日].*") 
+                || userMessage.contains("几天")
+                || userMessage.contains("周末")
+                || userMessage.contains("一天")
+                || userMessage.contains("两天")
+                || userMessage.contains("三天")
+                || userMessage.contains("一周");
+        
+        // 有目的地+时间 → GENERATE
+        if (hasDestination && hasTime) {
+            return "GENERATE";
+        }
+        
+        // 明确的规划关键词 + 时间 → GENERATE
+        boolean hasPlanKeyword = userMessage.contains("规划") || userMessage.contains("安排") 
+                || userMessage.contains("制定") || userMessage.contains("行程");
+        if (hasPlanKeyword && hasTime) {
+            return "GENERATE";
+        }
+        
+        // 无法快速判断，返回null交给LLM
+        return null;
     }
 
     /**
@@ -1936,17 +1978,16 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     + "  \"details\": \"具体修改内容描述\"\n"
                     + "}\n\n"
                     + "判断规则：\n"
-                    + "MODIFY（修改行程）特征：\n"
-                    + "- 要求替换/更换某个景点或活动（\"把故宫换成天坛\"）\n"
-                    + "- 要求添加/增加内容（\"加一个博物馆\"、\"多安排一天购物\"）\n"
-                    + "- 要求删除/去掉内容（\"删掉第二天的安排\"、\"不要去长城\"）\n"
-                    + "- 要求调整时间/顺序（\"把上午的行程调到下午\"）\n"
-                    + "- 要求交换顺序（\"第一天和第二天互换\"）\n"
-                    + "- 明确指向行程结构（天数、景点、酒店、餐饮等）\n\n"
-                    + "CHAT（闲聊/咨询）特征：\n"
+                    + "MODIFY（修改行程）必须同时满足：\n"
+                    + "- 明确要求对行程进行改动\n"
+                    + "- 指出具体的修改目标（景点、天数、酒店等）\n"
+                    + "- 例如：\"把故宫换成天坛\"、\"加一个博物馆\"、\"删掉第二天\"\n\n"
+                    + "CHAT（闲聊/咨询）包括：\n"
                     + "- 询问信息（\"北京有什么好吃的？\"、\"故宫门票多少钱？\"）\n"
                     + "- 征求建议（\"你觉得行程合理吗？\"、\"还有什么推荐？\"）\n"
                     + "- 闲聊（\"谢谢\"、\"好的\"）\n"
+                    + "- 询问偏好/习惯/设置（\"我有哪些偏好\"、\"我的设置是什么\"）\n"
+                    + "- 任何以\"我有哪些\"、\"什么是\"、\"怎么\"开头的问题\n"
                     + "- 不涉及具体行程修改的讨论\n\n"
                     + "modifyType 说明：\n"
                     + "- replace: 替换现有内容\n"
@@ -1959,7 +2000,9 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                     + "输入：\"把故宫换成颐和园\"\n"
                     + "输出：{\"intent\":\"MODIFY\",\"modifyType\":\"replace\",\"target\":\"故宫\",\"details\":\"换成颐和园\"}\n\n"
                     + "输入：\"第二天有什么安排？\"\n"
-                    + "输出：{\"intent\":\"CHAT\",\"modifyType\":null,\"target\":null,\"details\":\"询问第二天行程安排\"}");
+                    + "输出：{\"intent\":\"CHAT\",\"modifyType\":null,\"target\":null,\"details\":\"询问第二天行程安排\"}\n\n"
+                    + "输入：\"我有哪些偏好？\"\n"
+                    + "输出：{\"intent\":\"CHAT\",\"modifyType\":null,\"target\":null,\"details\":\"询问用户偏好设置\"}");
             msgs.add(sysMsg);
 
             ObjectNode userMsg = objectMapper.createObjectNode();

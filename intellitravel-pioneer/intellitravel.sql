@@ -42,6 +42,7 @@ DROP TABLE IF EXISTS `itinerary`;
 CREATE TABLE `itinerary` (
   `id` VARCHAR(36) NOT NULL,
   `user_id` VARCHAR(36) NOT NULL,
+  `conversation_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的对话ID',
   `title` VARCHAR(255) DEFAULT NULL,
   `plan` TEXT,
   `stats` TEXT,

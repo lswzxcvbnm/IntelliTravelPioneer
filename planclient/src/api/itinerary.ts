@@ -45,9 +45,11 @@ export interface ItineraryRequest {
     budgetLevel: string
     additionalNotes: string
     skillIds?: string[]
+    userPrompt?: string
 }
 
 export interface ItinerarySaveRequest {
+    conversationId?: string
     title: string
     estimatedCost: number
     totalDays: number
@@ -59,6 +61,7 @@ export interface ItinerarySaveRequest {
 export interface ItineraryVO {
     id: string
     userId: string
+    conversationId?: string
     title: string
     destination?: string
     plan: ItineraryPlan
