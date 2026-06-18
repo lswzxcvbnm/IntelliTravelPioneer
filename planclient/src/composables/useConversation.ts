@@ -1,6 +1,12 @@
 import { ref, nextTick } from 'vue'
 import { getConversationDetail, type AgentMessageVO } from '../api/conversation'
 
+export interface ThinkingLog {
+  type: 'phase' | 'thought' | 'tool' | 'error'
+  icon: string
+  text: string
+}
+
 export interface WsMessage {
   id: string
   role: 'user' | 'assistant'
@@ -8,6 +14,7 @@ export interface WsMessage {
   time: Date
   toolCalls?: string | null
   streaming?: boolean
+  thinkingLogs?: ThinkingLog[]
 }
 
 /** 将服务端 AgentMessageVO 转换为前端 WsMessage */

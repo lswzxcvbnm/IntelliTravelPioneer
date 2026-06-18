@@ -70,6 +70,33 @@
                     :toolCalls="msg.toolCalls"
                   />
 
+                  <!-- 思考过程（生成完成后显示） -->
+                  <div
+                    v-if="!msg.streaming && msg.thinkingLogs && msg.thinkingLogs.length > 0"
+                    class="ws-thinking"
+                  >
+                    <button
+                      class="ws-thinking-toggle"
+                      @click="toggleThinkingExpand(msg.id)"
+                    >
+                      <span class="ws-thinking-icon">🧠</span>
+                      <span class="ws-thinking-label">思考过程</span>
+                      <span class="ws-thinking-count">{{ msg.thinkingLogs.length }} 步</span>
+                      <span class="ws-thinking-arrow" :class="{ expanded: isThinkingExpanded(msg.id) }">▸</span>
+                    </button>
+                    <div v-if="isThinkingExpanded(msg.id)" class="ws-thinking-content">
+                      <div
+                        v-for="(log, li) in msg.thinkingLogs"
+                        :key="li"
+                        class="ws-thinking-entry"
+                        :class="log.type"
+                      >
+                        <span class="ws-thinking-entry-icon">{{ log.icon }}</span>
+                        <span class="ws-thinking-entry-text">{{ log.text }}</span>
+                      </div>
+                    </div>
+                  </div>
+
                   <!-- 流式生成指示器 -->
                   <div v-if="msg.streaming" class="ws-streaming">
                     <div class="ws-streaming-header">
@@ -181,7 +208,7 @@ import { generateItineraryStream, modifyItineraryStream, saveItinerary, updateIt
 import type { ItineraryRequest, ItineraryPlan, GenerationStats } from '../../api/itinerary'
 import { linkItinerary, updateConversation } from '../../api/conversation'
 import { listMySkills, type SkillVO } from '../../api/skill'
-import { useConversation } from '../../composables/useConversation'
+import { useConversation, type ThinkingLog } from '../../composables/useConversation'
 import { useItinerary } from '../../composables/useItinerary'
 import { useDragDrop } from '../../composables/useDragDrop'
 import BackButton from '../../components/BackButton.vue'
@@ -222,6 +249,7 @@ const spIcons = ['🏛', '💼', '😂', '🍜', '🏯', '🏖️']
 
 // ===== 消息展开状态 =====
 const expandedMessages = ref<Set<string>>(new Set())
+const expandedThinking = ref<Set<string>>(new Set())
 
 function isMessageExpanded(msgId: string): boolean {
   return expandedMessages.value.has(msgId)
@@ -235,6 +263,20 @@ function toggleMessageExpand(msgId: string) {
     s.add(msgId)
   }
   expandedMessages.value = s
+}
+
+function isThinkingExpanded(msgId: string): boolean {
+  return expandedThinking.value.has(msgId)
+}
+
+function toggleThinkingExpand(msgId: string) {
+  const s = new Set(expandedThinking.value)
+  if (s.has(msgId)) {
+    s.delete(msgId)
+  } else {
+    s.add(msgId)
+  }
+  expandedThinking.value = s
 }
 
 function isLongContent(content: string): boolean {
@@ -259,6 +301,10 @@ const currentAction = ref('')
 const currentPhase = ref('')
 const liveLogs = ref<Array<{ type: string; icon: string; text: string }>>([])
 const activeStats = ref<GenerationStats | null>(null)
+
+// 当前正在生成的消息ID及其思考日志
+const currentMsgId = ref<string | null>(null)
+const currentThinkingLogs = ref<ThinkingLog[]>([])
 
 // ===== 技能状态 =====
 const mySkills = ref<SkillVO[]>([])
@@ -465,6 +511,8 @@ async function handleFormSubmit(request: {
   isGenerating.value = true
   liveLogs.value = []
   currentPhase.value = ''
+  currentMsgId.value = assistMsgId
+  currentThinkingLogs.value = []
 
   try {
     await generateItineraryStream(
@@ -499,12 +547,16 @@ async function handleFormSubmit(request: {
       },
       (cid) => { convId.value = cid }
     )
+    // 生成完成后，将思考日志附加到消息上
+    updateMessage(assistMsgId, { thinkingLogs: [...currentThinkingLogs.value] })
     finalizeMessage(assistMsgId)
   } catch (e: any) {
     updateMessage(assistMsgId, { content: `生成失败: ${e?.message || '未知错误'}`, streaming: false })
   } finally {
     isGenerating.value = false
     inputMode.value = 'chat'
+    currentMsgId.value = null
+    currentThinkingLogs.value = []
   }
 }
 
@@ -513,6 +565,8 @@ async function runGenerate(msgId: string, userPrompt: string) {
   isGenerating.value = true
   liveLogs.value = []
   currentPhase.value = ''
+  currentMsgId.value = msgId
+  currentThinkingLogs.value = []
 
   try {
     const request = parseUserRequest(userPrompt)
@@ -549,17 +603,23 @@ async function runGenerate(msgId: string, userPrompt: string) {
       (cid) => { convId.value = cid }
     )
 
+    // 生成完成后，将思考日志附加到消息上
+    updateMessage(msgId, { thinkingLogs: [...currentThinkingLogs.value] })
     finalizeMessage(msgId)
   } catch (e: any) {
     updateMessage(msgId, { content: `❌ 生成失败: ${e?.message || '未知错误'}`, streaming: false })
   } finally {
     isGenerating.value = false
+    currentMsgId.value = null
+    currentThinkingLogs.value = []
   }
 }
 
 async function runRefine(msgId: string, userPrompt: string) {
   isRefining.value = true
   liveLogs.value = []
+  currentMsgId.value = msgId
+  currentThinkingLogs.value = []
 
   try {
     const originalPlan = { ...editablePlan.value } as ItineraryPlan
@@ -600,17 +660,24 @@ async function runRefine(msgId: string, userPrompt: string) {
       (cid) => { convId.value = cid }
     )
 
+    // 优化完成后，将思考日志附加到消息上
+    updateMessage(msgId, { thinkingLogs: [...currentThinkingLogs.value] })
     finalizeMessage(msgId)
   } catch (e: any) {
     updateMessage(msgId, { content: `❌ 优化失败: ${e?.message || '未知错误'}`, streaming: false })
   } finally {
     isRefining.value = false
+    currentMsgId.value = null
+    currentThinkingLogs.value = []
   }
 }
 
 // ===== 辅助方法 =====
 function addLog(type: string, icon: string, text: string) {
-  liveLogs.value.push({ type, icon, text: text.slice(0, 200) })
+  const log = { type, icon, text: text.slice(0, 200) }
+  liveLogs.value.push(log)
+  // 同时收集到当前消息的思考日志中
+  currentThinkingLogs.value.push(log as ThinkingLog)
 }
 
 /** 自动保存行程并关联到对话 */
@@ -1192,6 +1259,114 @@ onBeforeRouteLeave(async (to, from, next) => {
 .ws-log-entry.error { color: #EF4444; }
 .ws-log-icon { flex-shrink: 0; }
 .ws-log-text { word-break: break-all; }
+
+/* ====== 思考过程折叠框 ====== */
+.ws-thinking {
+  margin-top: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(99, 102, 241, 0.12);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.03) 0%, rgba(139, 92, 246, 0.03) 100%);
+  overflow: hidden;
+}
+
+.ws-thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.2s;
+  outline: none;
+}
+.ws-thinking-toggle:hover {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.ws-thinking-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.ws-thinking-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6366f1;
+  flex: 1;
+  text-align: left;
+}
+
+.ws-thinking-count {
+  font-size: 11px;
+  color: #94a3b8;
+  background: rgba(99, 102, 241, 0.08);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.ws-thinking-arrow {
+  font-size: 12px;
+  color: #94a3b8;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.ws-thinking-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.ws-thinking-content {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: fadeInUp 0.2s ease;
+}
+
+.ws-thinking-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.ws-thinking-entry.phase {
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.06);
+}
+.ws-thinking-entry.thought {
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.06);
+}
+.ws-thinking-entry.tool {
+  color: #3385FF;
+  background: rgba(51, 133, 255, 0.06);
+}
+.ws-thinking-entry.error {
+  color: #EF4444;
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.ws-thinking-entry-icon {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ws-thinking-entry-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+}
 
 /* ====== 输入区域（悬浮容器） ====== */
 .ws-input-area {

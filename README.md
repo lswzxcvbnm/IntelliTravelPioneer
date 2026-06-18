@@ -59,7 +59,6 @@ agent-project/
 ├── intellitravel-pioneer/        # 后端Spring Boot项目
 │   ├── src/main/java/            # Java源码
 │   │   ├── controller/           # REST控制器
-│   │   │   ├── AiChatController.java        # AI聊天
 │   │   │   ├── AmApiController.java         # 地图API
 │   │   │   ├── ConversationController.java  # 对话管理
 │   │   │   ├── ItineraryController.java     # 行程规划（SSE）
@@ -71,8 +70,7 @@ agent-project/
 │   │   │   │   ├── TripPlanningAiClient.java       # AI客户端接口
 │   │   │   │   └── HttpTripPlanningAiClient.java   # 实现（含全部Prompt模板）
 │   │   │   ├── serviceImpl/      # 服务实现
-│   │   │   │   ├── ItineraryServiceImpl.java       # 行程服务（意图识别入口）
-│   │   │   │   └── AiChatServiceImpl.java          # AI聊天服务（独立入口）
+│   │   │   │   └── ItineraryServiceImpl.java       # 行程服务（意图识别入口）
 │   │   │   ├── IntentStateMachine.java    # 意图状态机
 │   │   │   ├── EntityTracker.java         # 实体追踪
 │   │   │   ├── ActionTracker.java         # 操作历史
@@ -265,12 +263,6 @@ Phase 3: VERIFY（审核阶段）
 | PUT | `/api/itinerary/{id}` | 更新行程 |
 | GET | `/api/itinerary/detail/{id}` | 获取行程详情 |
 | GET | `/api/itinerary/list` | 获取行程列表 |
-
-### AI聊天模块 (`/api/ai`)
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/ai/chat/stream` | SSE流式AI聊天（独立入口，含意图分类） |
 
 ### 对话模块 (`/api/conversation`)
 
