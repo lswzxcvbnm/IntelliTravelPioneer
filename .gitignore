@@ -1,8 +1,22 @@
-Changes.md
-2.md
-2026软工三-迭代三任务说明-508.pdf
-演示视频稿.md
-演示视频稿.pdf
-Agent应用实现架构介绍.md
-Agent应用实现架构介绍.pdf
-IntelliTravel Pioneer 迭代计划.pdf
+# 文档和演示素材
+docs/
+迭代三演示PPT素材.md
+Agent优化文档.md
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 依赖
+node_modules/
+target/
+*.class
+*.jar
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
