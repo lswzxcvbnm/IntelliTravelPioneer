@@ -14,7 +14,9 @@
 4. [HTTPS 配置（SSL 证书）](#四https-配置ssl-证书)
 5. [CI/CD 自动化部署（可选）](#五cicd-自动化部署可选)
 6. [常见问题排查](#六常见问题排查)
-7. [附录：各云平台操作速查](#七附录各云平台操作速查)
+7. [IP 切换为域名访问](#七ip-切换为域名访问)
+8. [代码更新与重新部署](#八代码更新与重新部署)
+9. [附录：各云平台操作速查](#九附录各云平台操作速查)
 
 ---
 
@@ -828,34 +830,288 @@ DB_URL: jdbc:mysql://localhost:3306/intellitravel?... # ❌
 
 `npm run build` 产出的 `dist/` 目录是纯静态文件（HTML + CSS + JS + 图片），与操作系统无关。Windows 上构建的产物可以直接复制到 Linux Nginx 下使用。
 
-**后端（Spring Boot / Maven）— ⚠️ 有一个注意事项**
+**后端（Spring Boot / Maven）— ✅ 没问题**
 
-| 组件 | 兼容性 | 说明 |
-|------|--------|------|
-| JAR 包 | ✅ 没问题 | Java 字节码与平台无关，`mvnw package` 在 Windows 和 Linux 产出相同 JAR |
-| Maven 依赖 | ✅ 没问题 | 所有纯 Java 依赖都跨平台 |
-| `mvnw` 脚本 | ⚠️ 注意 | Windows 用 `mvnw.cmd`，Linux 用 `mvnw`（无后缀）。在 Linux 上构建直接用 `./mvnw` |
-| **Playwright** | 🔴 需处理 | 海报截图功能依赖 Chromium 原生库，已排除 `driver-bundle` |
+JAR 包是纯 Java 字节码，跨平台运行。在 Windows 上用 `mvnw.cmd package`、Linux 上用 `./mvnw package`，产出相同的 JAR。
 
-**Playwright 的跨平台处理**：
-
-`pom.xml` 中排除了 `driver-bundle`，所以 JAR 中不包含任何平台特定的原生二进制文件。部署到 Linux 后，Playwright 会**在首次运行时自动从 CDN 下载** Linux 版的 Chromium 驱动。
-
-但前提是 Linux 服务器上已安装系统依赖库（见方案 A/B 中的"安装 Playwright 系统依赖"步骤）。如果缺少这些库，调用海报生成 API 时会抛出 `UnsatisfiedLinkError`。
-
-**最佳实践**：
-
-| 策略 | 做法 |
-|------|------|
-| ✅ 推荐 | 在 Linux 服务器上用 `./mvnw package` 重新构建一次后端 JAR，确保一致性 |
-| ⚠️ 可用 | Windows 构建 JAR 上传到 Linux 运行（纯 Java 可行），但必须确保 Linux 上 Playwright 系统依赖已装 |
-| ❌ 不推荐 | Windows 上 `npm run build` 后直接复制 `dist/` 到 Linux — 这个其实完全可行，前端产物无平台依赖 |
-
-> **总结**：前端没有问题。后端最简单的做法是——源码上传到 Linux 服务器，在服务器上执行 `./mvnw package` 构建。如必须在 Windows 上构建后上传，只要 Linux 上 Playwright 依赖已安装，也能正常运行。
+> **总结**：前端和后端都可以在 Windows 上编译后直接部署到 Linux，无兼容性问题。
 
 ---
 
-## 七、附录：各云平台操作速查
+## 七、IP 切换为域名访问
+
+已经用公网 IP 部署成功后，切换为域名访问需要以下几步。
+
+### 7.1 总体流程
+
+```
+① 购买域名 + 备案（如未完成）
+       ↓
+② DNS 解析 → 将域名指向服务器 IP
+       ↓
+③ 修改前端 API_BASE_URL → 重新构建上传
+       ↓
+④ 修改 Nginx server_name → 重载
+       ↓
+⑤ 配置 SSL 证书（HTTPS）
+       ↓
+⑥ 验证
+```
+
+### 7.2 第一步：DNS 解析
+
+在域名服务商（阿里云/腾讯云/Cloudflare 等）的 DNS 解析中添加 A 记录：
+
+| 记录类型 | 主机记录 | 记录值 | TTL |
+|----------|---------|--------|-----|
+| A | `@`（裸域名） | `218.244.153.122` | 600 |
+| A | `www` | `218.244.153.122` | 600 |
+
+**验证解析生效**（可能需要几分钟到几小时）：
+
+```bash
+# 在本地执行
+nslookup 你的域名.com
+# 或
+ping 你的域名.com
+```
+
+### 7.3 第二步：修改前端 API 地址并重新构建
+
+编辑 [planclient/src/config/api.ts](planclient/src/config/api.ts)：
+
+```typescript
+// 修改前（使用 IP）
+export const API_BASE_URL = 'http://218.244.153.122'
+
+// 修改后（使用域名）
+export const API_BASE_URL = 'https://你的域名.com'
+```
+
+> ⚠️ 如果之后还要配置 HTTPS，这里直接用 `https://`。如果暂时只用 HTTP，用 `http://`。
+
+重新构建并上传：
+
+```bash
+cd planclient/
+npm run build
+ssh root@218.244.153.122 "rm -rf /var/www/intellitravel/dist"
+scp -r dist/ root@218.244.153.122:/var/www/intellitravel/
+```
+
+### 7.4 第三步：修改 Nginx 配置
+
+SSH 登录服务器，编辑 Nginx 配置：
+
+```bash
+ssh root@218.244.153.122
+sudo vim /etc/nginx/sites-available/intellitravel
+```
+
+将 `server_name` 从 IP 改为域名：
+
+```nginx
+server {
+    listen 80;
+    server_name 你的域名.com www.你的域名.com;   # ← 改这里
+
+    # ... 其余配置保持不变 ...
+}
+```
+
+重载 Nginx：
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### 7.5 第四步：配置 HTTPS（推荐）
+
+参考第四章的完整步骤，使用 Let's Encrypt 获取免费 SSL 证书：
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d 你的域名.com -d www.你的域名.com
+```
+
+Certbot 会自动修改 Nginx 配置，添加 443 端口监听和 SSL 证书路径，并将 HTTP 自动跳转到 HTTPS。
+
+### 7.6 第五步：验证
+
+```bash
+# 测试 HTTP 跳转
+curl -I http://你的域名.com
+# 应返回 301 跳转到 https
+
+# 测试 HTTPS
+curl https://你的域名.com/api/user/health
+# 应返回正常 JSON
+
+# 浏览器访问 https://你的域名.com
+```
+
+### 7.7 注意事项
+
+| 事项 | 说明 |
+|------|------|
+| **域名备案** | 中国大陆服务器必须备案，否则无法通过域名访问。备案通常需要 15-20 个工作日 |
+| **API 地址一致性** | `api.ts` 中的地址必须与用户浏览器访问的地址**同源**（协议+域名+端口一致），否则会触发跨域问题。如果 HTTPS 部署就用 `https://域名`，HTTP 就用 `http://域名` |
+| **后端无需改** | 后端不感知域名变化，它只监听 `127.0.0.1:8080`，由 Nginx 反向代理 |
+| **JWT 不受影响** | JWT 不绑定域名，切换域名不影响已登录用户 |
+
+---
+
+## 八、代码更新与重新部署
+
+项目上线后，代码更新只需重新编译并上传变更部分，不需要重新执行全部部署步骤。
+
+### 8.1 快速参考：什么变了，就更新什么
+
+| 变更范围 | 需要重新做的操作 | 不需要做的 |
+|----------|-----------------|-----------|
+| 仅前端代码（页面/组件/样式） | 重新 `npm run build` → 上传 `dist/` | 后端不用动，数据库不用动 |
+| 仅后端代码（Java 逻辑/API） | 重新 `mvnw package` → 上传 JAR → 重启后端 | 前端不用动，数据库一般不用动 |
+| 数据库表结构变更 | 重新编译后端 → 上传重启（JPA auto-update） | 前端不用动，Nginx 不用动 |
+| 环境变量/密钥变更 | 修改 systemd 环境变量 → 重启后端 | 不重新编译 |
+| Nginx 配置变更 | 修改配置 → `nginx -t && reload` | 前后端不用动 |
+| 前后端都变更 | 两者都重新编译上传 | 数据库一般不用动 |
+
+### 8.2 仅更新前端
+
+在**本地开发机**上操作：
+
+```bash
+# 1. 进入前端目录，拉取最新代码或修改代码
+cd planclient/
+
+# 2. 重新构建
+npm run build
+
+# 3. 备份旧文件（可选，方便回滚）
+ssh root@218.244.153.122 "cp -r /var/www/intellitravel/dist /var/www/intellitravel/dist.bak.$(date +%Y%m%d_%H%M%S)"
+
+# 4. 上传新文件
+scp -r dist/* root@218.244.153.122:/var/www/intellitravel/dist/
+
+# 5. 清理浏览器缓存，刷新页面验证
+# 无需重启任何服务！
+```
+
+### 8.3 仅更新后端
+
+在**本地开发机**上操作：
+
+```bash
+# 1. 进入后端目录
+cd intellitravel-pioneer/
+
+# 2. 重新编译
+./mvnw clean package -DskipTests
+
+# 3. 上传新 JAR 到服务器
+scp target/intellitravel-pioneer-0.0.1-SNAPSHOT.jar root@218.244.153.122:/opt/intellitravel/
+
+# 4. 重启后端服务
+ssh root@218.244.153.122 "sudo systemctl restart intellitravel"
+
+# 5. 查看日志确认启动成功
+ssh root@218.244.153.122 "sudo journalctl -u intellitravel -f"
+```
+
+> 💡 **技巧**：如果担心更新出问题，可以先把旧 JAR 备份：
+> ```bash
+> ssh root@218.244.153.122 "cp /opt/intellitravel/intellitravel-pioneer-0.0.1-SNAPSHOT.jar /opt/intellitravel/intellitravel-pioneer-0.0.1-SNAPSHOT.jar.bak"
+> ```
+
+### 8.4 前后端同时更新
+
+合并 8.2 和 8.3 的操作：
+
+```bash
+# ==== 后端 ====
+cd intellitravel-pioneer/
+./mvnw clean package -DskipTests
+scp target/intellitravel-pioneer-0.0.1-SNAPSHOT.jar root@218.244.153.122:/opt/intellitravel/
+
+# ==== 前端 ====
+cd ../planclient/
+npm run build
+scp -r dist/* root@218.244.153.122:/var/www/intellitravel/dist/
+
+# ==== 重启后端 ====
+ssh root@218.244.153.122 "sudo systemctl restart intellitravel"
+```
+
+### 8.5 零停机更新（进阶）
+
+对于需要持续服务的生产环境，可以用滚动重启：
+
+```bash
+# 方法：先上传新 JAR，用不同端口启动新实例，切换 Nginx upstream，再停旧实例
+
+# 1. 上传新 JAR（带版本号命名）
+scp target/intellitravel-pioneer-0.0.1-SNAPSHOT.jar \
+    root@218.244.153.122:/opt/intellitravel/intellitravel-pioneer-v2.jar
+
+# 2. 在服务器上启动新实例（不同端口）
+ssh root@218.244.153.122 "
+  java -jar /opt/intellitravel/intellitravel-pioneer-v2.jar \
+    --server.port=8081 &
+"
+
+# 3. 等新实例启动完成后，切换 Nginx upstream 到 8081
+#   （修改 /etc/nginx/sites-available/intellitravel 中 proxy_pass 的端口）
+#   sudo nginx -t && sudo systemctl reload nginx
+
+# 4. 停掉旧 8080 实例
+#   sudo systemctl stop intellitravel
+```
+
+> 大多数中小项目不需要零停机更新，直接 `systemctl restart` 的停机时间通常只有 10-20 秒。
+
+### 8.6 更新失败如何回滚
+
+```bash
+# 前端回滚：恢复备份的 dist 目录
+ssh root@218.244.153.122 "rm -rf /var/www/intellitravel/dist && mv /var/www/intellitravel/dist.bak.20260614_120000 /var/www/intellitravel/dist"
+
+# 后端回滚：恢复旧 JAR 并重启
+ssh root@218.244.153.122 "
+  cp /opt/intellitravel/intellitravel-pioneer-0.0.1-SNAPSHOT.jar.bak /opt/intellitravel/intellitravel-pioneer-0.0.1-SNAPSHOT.jar &&
+  sudo systemctl restart intellitravel
+"
+```
+
+### 8.7 使用 Git 管理部署（推荐）
+
+更规范的做法是服务器上直接用 Git 拉取代码，在服务器上编译部署：
+
+```bash
+# 在服务器上
+cd /opt/intellitravel-source   # 源码仓库目录
+git pull origin master         # 拉取最新代码
+
+# 构建后端
+cd intellitravel-pioneer/
+./mvnw clean package -DskipTests
+cp target/*.jar /opt/intellitravel/
+
+# 构建前端
+cd ../planclient/
+npm ci
+npm run build
+rm -rf /var/www/intellitravel/dist
+cp -r dist/ /var/www/intellitravel/
+
+# 重启后端
+sudo systemctl restart intellitravel
+```
+
+> 💡 可以把这个流程写成一个脚本 `deploy.sh`，之后更新只需要执行 `./deploy.sh`。
+
+---
+
+## 九、附录：各云平台操作速查
 
 ### 阿里云 ECS
 
