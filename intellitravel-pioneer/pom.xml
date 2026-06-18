@@ -113,19 +113,6 @@
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
 
-        <!-- 微软 Playwright (Java版本): 负责把生成的 HTML 渲染截成图片(海报) -->
-        <dependency>
-            <groupId>com.microsoft.playwright</groupId>
-            <artifactId>playwright</artifactId>
-            <version>1.40.0</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.microsoft.playwright</groupId>
-                    <artifactId>driver-bundle</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
         <dependency>
             <groupId>at.favre.lib</groupId>
             <artifactId>bcrypt</artifactId>
