@@ -12,6 +12,7 @@ PlanClient是IntelliTravel AI旅行规划系统的前端应用，采用Vue 3 Com
 - **实时对话**: 支持多轮对话优化行程
 - **行程画布**: 时间线视图，支持拖拽排序
 - **SSE实时通信**: 实时显示Agent执行过程
+- **全局偏好设置**: 跨对话知识共享，AI回复遵守自定义规则
 - **响应式设计**: 支持多端适配
 - **组件化架构**: 高度可复用的组件设计
 
@@ -34,6 +35,8 @@ PlanClient是IntelliTravel AI旅行规划系统的前端应用，采用Vue 3 Com
 planclient/
 ├── src/
 │   ├── api/                  # API接口封装
+│   │   ├── itinerary.ts           # 行程API
+│   │   └── preference.ts          # 全局偏好API
 │   ├── components/           # 通用组件
 │   ├── composables/          # 组合式函数
 │   │   ├── useBackHandler.ts    # 返回处理
@@ -50,7 +53,9 @@ planclient/
 │   ├── views/                # 页面组件
 │   │   ├── battle/             # 行程仓库
 │   │   ├── conversation/       # 对话历史列表
-│   │   ├── user/               # 用户登录/注册
+│   │   ├── user/               # 用户登录/注册/偏好设置
+│   │   │   ├── Dashboard.vue       # 首页仪表盘
+│   │   │   └── UserPreferences.vue # 全局偏好设置页面
 │   │   └── workspace/          # 工作区（核心页面集合）
 │   │       ├── Workspace.vue         # AI行程规划工作台
 │   │       ├── ItineraryCanvas.vue   # 行程画布（时间线+拖拽编辑）
@@ -275,11 +280,20 @@ npm run lint:fix
 - 点击展开详情
 - 一键跳转地图
 
-### 4. 用户系统
+### 4. 全局偏好设置
+
+- **偏好类别**: 回答风格(STYLE)、饮食偏好(DIET)、体能水平(FITNESS)、特殊需求(SPECIAL)、自定义规则(CUSTOM)
+- **卡片式交互**: 可视化多选，点击切换选中状态
+- **自定义规则**: 动态添加/删除自定义规则，AI回复严格遵守
+- **AI集成**: 偏好自动注入到行程生成和修改的AI提示词中
+- **安全防护**: 内置Prompt Injection检测，内容长度限制
+
+### 5. 用户系统
 
 - 用户注册/登录
 - 个人信息管理
 - 行程收藏/分享
+- 全局偏好设置（跨对话知识共享）
 
 ## 浏览器支持
 

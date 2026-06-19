@@ -216,6 +216,15 @@ public class ItineraryController {
                 }, conversationId);
                 
                 System.out.println("====== modifyItinerary completed, sending result ======");
+                
+                // 发送聊天回答（如有）
+                if (result.getChatAnswer() != null && !result.getChatAnswer().isBlank()) {
+                    System.out.println("Sending chat answer (modify): " + result.getChatAnswer().substring(0, Math.min(100, result.getChatAnswer().length())) + "...");
+                    emitter.send(SseEmitter.event()
+                            .name("chat")
+                            .data(result.getChatAnswer()));
+                }
+                
                 String planJson = objectMapper.writeValueAsString(result.getPlan());
                 System.out.println("Result JSON length: " + planJson.length());
                 emitter.send(SseEmitter.event().name("result").data(planJson));

@@ -26,6 +26,10 @@
               <span class="action-icon">🧩</span>
               <span>技能工作台</span>
             </button>
+            <button class="action-btn-secondary" @click="handleProtectedNavigation('/preferences')">
+              <span class="action-icon">🎯</span>
+              <span>全局偏好</span>
+            </button>
           </div>
         </div>
       </section>

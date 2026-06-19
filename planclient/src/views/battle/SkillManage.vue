@@ -40,8 +40,8 @@
       <p class="empty-desc" v-if="activeTab === 'mine'">点击右上角"创建技能"来定义你的第一个 Agent 专属技能</p>
     </div>
 
-    <TransitionGroup v-else name="list" tag="div" class="skill-grid">
-      <div v-for="skill in currentList" :key="skill.id" class="skill-card">
+    <div v-else class="skill-grid">
+      <div v-for="(skill, index) in currentList" :key="skill.id" class="skill-card" :style="{ animationDelay: `${index * 0.05}s` }">
         <div class="skill-card-header">
           <span class="skill-name">{{ skill.name }}</span>
           <span class="skill-badge" v-if="skill.isPublic">公开</span>
@@ -59,9 +59,12 @@
             <button class="btn-text" @click="showEditDialog(skill)">编辑</button>
             <button class="btn-text danger" @click="confirmDelete(skill)">删除</button>
           </div>
+          <div class="skill-actions" v-else>
+            <button class="btn-text copy" @click="copyPublicSkill(skill)">复制到我的技能</button>
+          </div>
         </div>
       </div>
-    </TransitionGroup>
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -304,6 +307,24 @@ function removeScript(i: number) {
   form.value.scripts.splice(i, 1)
 }
 
+async function copyPublicSkill(skill: SkillVO) {
+  try {
+    await createSkill({
+      name: skill.name,
+      description: skill.description || '',
+      prompt: skill.prompt,
+      isPublic: false,
+      references: skill.references || {},
+      scripts: skill.scripts || {},
+    })
+    ElMessage.success(`已复制「${skill.name}」到我的技能`)
+    await loadSkills()
+    activeTab.value = 'mine'
+  } catch {
+    ElMessage.error('复制失败，请重试')
+  }
+}
+
 onMounted(() => { loadSkills() })
 </script>
 
@@ -318,16 +339,20 @@ onMounted(() => { loadSkills() })
   padding: 9px 18px; border: 1px solid #c0c4cc; border-radius: 10px;
   background: #fff; color: #606266; font-size: 14px; cursor: pointer;
   transition: all .2s;
+  outline: none;
 }
 .btn-outline:hover { border-color: #8AC4FF; color: #3385FF; }
+.btn-outline:focus { outline: none; box-shadow: none; }
 .btn-create {
   display: flex; align-items: center; gap: 5px;
   padding: 9px 20px; border: none; border-radius: 10px;
   background: linear-gradient(135deg, #8AC4FF, #3385FF);
   color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
   transition: opacity .2s;
+  outline: none;
 }
 .btn-create:hover { opacity: .9; }
+.btn-create:focus { outline: none; box-shadow: none; }
 
 .tab-bar { display: flex; gap: 0; margin-bottom: 24px; border-bottom: 2px solid #ebeef5; }
 .tab-item {
@@ -335,16 +360,23 @@ onMounted(() => { loadSkills() })
   font-size: 15px; color: #909399; cursor: pointer;
   border-bottom: 2px solid transparent; margin-bottom: -2px;
   transition: all .2s;
+  outline: none;
 }
 .tab-item.active { color: #3385FF; border-bottom-color: #3385FF; font-weight: 600; }
 .tab-item:hover { color: #3385FF; }
+.tab-item:focus { outline: none; box-shadow: none; }
 
-.skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; width: 100%; }
 .skill-card {
   background: #fff; border-radius: 14px; padding: 18px 20px;
   box-shadow: 0 2px 12px rgba(0,0,0,.04); transition: box-shadow .2s, transform .2s;
+  animation: cardFadeIn .3s ease both;
 }
 .skill-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.08); transform: translateY(-2px); }
+@keyframes cardFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .skill-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .skill-name { font-size: 16px; font-weight: 700; color: #1a1a2e; }
 .skill-badge {
@@ -357,9 +389,11 @@ onMounted(() => { loadSkills() })
 .skill-card-footer { display: flex; justify-content: space-between; align-items: center; }
 .skill-time { font-size: 12px; color: #c0c4cc; }
 .skill-actions { display: flex; gap: 8px; }
-.btn-text { border: none; background: none; font-size: 13px; color: #3385FF; cursor: pointer; padding: 0; }
+.btn-text { border: none; background: none; font-size: 13px; color: #3385FF; cursor: pointer; padding: 0; outline: none; }
 .btn-text:hover { text-decoration: underline; }
+.btn-text:focus { outline: none; box-shadow: none; }
 .btn-text.danger { color: #f56c6c; }
+.btn-text.copy { color: #7c3aed; }
 
 .skill-form { display: flex; flex-direction: column; gap: 16px; }
 .form-group { display: flex; flex-direction: column; gap: 6px; }
@@ -379,13 +413,17 @@ onMounted(() => { loadSkills() })
 .btn-cancel {
   padding: 9px 20px; border: 1px solid #dcdfe6; border-radius: 8px;
   background: #fff; color: #606266; font-size: 14px; cursor: pointer;
+  outline: none;
 }
+.btn-cancel:focus { outline: none; box-shadow: none; }
 .btn-submit {
   padding: 9px 24px; border: none; border-radius: 8px;
   background: linear-gradient(135deg, #8AC4FF, #3385FF);
   color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
   margin-left: 10px;
+  outline: none;
 }
+.btn-submit:focus { outline: none; box-shadow: none; }
 .btn-submit:disabled { opacity: .5; cursor: not-allowed; }
 
 .skeleton-list { display: flex; flex-direction: column; gap: 12px; }
@@ -399,10 +437,7 @@ onMounted(() => { loadSkills() })
 .empty-title { font-size: 16px; font-weight: 600; margin: 0 0 6px; color: #606266; }
 .empty-desc { font-size: 13px; margin: 0; }
 
-.list-enter-active { transition: all .3s ease; }
-.list-leave-active { transition: all .2s ease; }
-.list-enter-from { opacity: 0; transform: translateY(10px); }
-.list-leave-to { opacity: 0; }
+
 
 /* Resources tags */
 .skill-resources { display: flex; gap: 6px; margin-bottom: 10px; }
@@ -431,12 +466,16 @@ onMounted(() => { loadSkills() })
 .btn-remove-kv {
   border: none; background: none; color: #f56c6c; font-size: 16px;
   cursor: pointer; padding: 4px 6px; line-height: 1;
+  outline: none;
 }
 .btn-remove-kv:hover { opacity: .7; }
+.btn-remove-kv:focus { outline: none; box-shadow: none; }
 .btn-add-kv {
   border: 1px dashed #c0c4cc; border-radius: 6px; background: none;
   padding: 6px 14px; font-size: 13px; color: #909399; cursor: pointer;
   width: 100%; text-align: center; transition: all .2s;
+  outline: none;
 }
 .btn-add-kv:hover { border-color: #8AC4FF; color: #3385FF; }
+.btn-add-kv:focus { outline: none; box-shadow: none; }
 </style>

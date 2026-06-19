@@ -34,7 +34,7 @@ public interface TripPlanningAiClient {
     }
 
     /** Generate a brief chat answer for non-modify questions in refine panel */
-    default String answerChatQuestion(String userMessage, String currentPlanJson) {
+    default String answerChatQuestion(String userMessage, String currentPlanJson, String token) {
         return "如需修改行程，请明确说明如何调整（如\"把第一天换成室内景点\"）。";
     }
 }

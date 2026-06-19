@@ -394,5 +394,21 @@ CREATE TABLE `agent_message` (
   INDEX `idx_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI Agent 对话消息表';
 
+-- 26. 用户全局偏好表（跨对话知识共享）
+DROP TABLE IF EXISTS `user_global_preference`;
+CREATE TABLE `user_global_preference` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `user_id` VARCHAR(36) NOT NULL COMMENT '用户ID',
+  `category` VARCHAR(50) NOT NULL COMMENT '偏好类别: STYLE(回答风格), DIET(饮食偏好), FITNESS(体能水平), SPECIAL(特殊需求), CUSTOM(自定义)',
+  `preference_key` VARCHAR(100) NOT NULL COMMENT '偏好键',
+  `preference_value` TEXT NOT NULL COMMENT '偏好值/描述',
+  `enabled` BIT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
+  `created_at` DATETIME DEFAULT NULL COMMENT '创建时间',
+  `updated_at` DATETIME DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_category_key` (`user_id`, `category`, `preference_key`),
+  INDEX `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户全局偏好表（跨对话知识共享）';
+
 -- 重新启用外键检查
 SET FOREIGN_KEY_CHECKS = 1;

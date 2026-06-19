@@ -83,7 +83,16 @@
               <el-icon class="modal-icon" :size="22"><WarningFilled /></el-icon>
               <h3>确认删除</h3>
             </div>
-            <p class="modal-message">确定要删除 <strong>{{ deletingItem?.title }}</strong> 吗？此操作不可恢复。</p>
+            <p class="modal-message">
+              确定要删除 <strong>{{ deletingItem?.title }}</strong> 吗？
+              <br><br>
+              <span v-if="deletingItem?.conversationId" class="modal-warning">
+                ⚠️ 此操作将同时删除该行程关联的对话历史，且不可恢复。
+              </span>
+              <span v-else class="modal-warning">
+                此操作不可恢复。
+              </span>
+            </p>
             <div class="modal-actions">
               <button class="btn-cancel" @click="closeDeleteModal">取消</button>
               <button class="btn-confirm" @click="confirmDelete" :disabled="isDeleting">
@@ -365,6 +374,7 @@ onMounted(() => { refreshList() })
 .modal-icon { color: #E53E3E; }
 .modal-header h3 { margin: 0; font-size: 18px; color: #1E3A5F; }
 .modal-message { font-size: 14px; color: #3B5998; line-height: 1.6; margin-bottom: 24px; }
+.modal-warning { color: #E6A23C; font-size: 13px; }
 .modal-actions { display: flex; gap: 12px; }
 .btn-cancel, .btn-confirm {
   flex: 1; padding: 12px; border-radius: 12px; font-size: 14px; font-weight: 600; cursor: pointer; border: none;

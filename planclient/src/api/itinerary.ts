@@ -46,6 +46,7 @@ export interface ItineraryRequest {
     additionalNotes: string
     skillIds?: string[]
     userPrompt?: string
+    conversationId?: string
 }
 
 export interface ItinerarySaveRequest {

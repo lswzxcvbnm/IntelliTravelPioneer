@@ -15,6 +15,7 @@ IntelliTravel Pioneer后端是AI旅行规划系统的核心服务，采用ReAct 
 - **多轮对话**: 支持持续对话优化行程
 - **JWT认证**: 用户身份验证和授权
 - **文件上传**: 支持阿里云OSS文件存储
+- **跨对话知识共享**: 用户可设置全局偏好，在所有对话中生效，AI回复遵守自定义规则
 
 ## 智能意图识别
 
@@ -135,7 +136,8 @@ intellitravel-pioneer/
 │   │   ├── SocialController.java        # 社交管理
 │   │   ├── ToolsController.java         # 工具管理
 │   │   ├── UserController.java          # 用户管理
-│   │   └── UserHealthController.java    # 用户健康
+│   │   ├── UserHealthController.java    # 用户健康
+│   │   └── UserGlobalPreferenceController.java  # 全局偏好设置
 │   ├── service/              # 业务逻辑层（包含多个服务类）
 │   │   ├── ai/               # AI客户端（Agent Loop + Prompt + 意图识别）
 │   │   │   ├── TripPlanningAiClient.java       # AI客户端接口
@@ -159,7 +161,8 @@ intellitravel-pioneer/
 │   │   ├── ToolManagementService.java # 工具管理服务
 │   │   ├── TripSummaryService.java    # 行程摘要服务
 │   │   ├── UserHealthService.java     # 用户健康服务
-│   │   └── UserService.java           # 用户服务
+│   │   ├── UserService.java           # 用户服务
+│   │   └── UserGlobalPreferenceService.java  # 全局偏好服务
 │   ├── repository/           # 数据访问层
 │   ├── po/                   # 持久化对象
 │   ├── vo/                   # 视图对象
@@ -316,6 +319,18 @@ java -jar target/intellitravel-pioneer-0.0.1-SNAPSHOT.jar
 | GET | `/api/tools/list` | 获取工具列表 |
 | POST | `/api/tools/{id}/toggle` | 启用/禁用工具 |
 
+### 全局偏好模块 (`/api/preference`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/preference` | 获取用户所有偏好 |
+| GET | `/api/preference/{category}` | 获取指定类别偏好 |
+| GET | `/api/preference/categories` | 获取所有可用类别定义 |
+| POST | `/api/preference` | 保存或更新偏好 |
+| POST | `/api/preference/batch` | 批量保存偏好 |
+| PUT | `/api/preference/{category}/{key}/toggle` | 切换偏好启用状态 |
+| DELETE | `/api/preference/{category}/{key}` | 删除偏好 |
+
 ### 地图模块 (`/api/amap`)
 
 | 方法 | 路径 | 说明 |
@@ -364,6 +379,7 @@ java -jar target/intellitravel-pioneer-0.0.1-SNAPSHOT.jar
 - `thought`: Agent思考过程
 - `tool`: 工具调用详情
 - `result`: 最终行程JSON
+- `chat`: AI自然语言回复（行程生成/修改后的总结）
 - `stats`: Token使用统计
 - `conversationId`: 对话ID
 

@@ -263,9 +263,17 @@ onMounted(() => {
                         <button class="conv-action-btn" title="编辑对话" @click="openEditDialog(conv)">
                             编辑
                         </button>
-                        <button class="conv-action-btn is-danger" title="删除对话" @click="handleDelete(conv)">
+                        <button 
+                            v-if="!conv.itineraryId" 
+                            class="conv-action-btn is-danger" 
+                            title="删除对话" 
+                            @click="handleDelete(conv)"
+                        >
                             删除
                         </button>
+                        <span v-else class="conv-action-hint" title="有关联行程，请在行程管理中删除">
+                            🔒
+                        </span>
                     </div>
                 </div>
             </div>
@@ -330,37 +338,43 @@ onMounted(() => {
     gap: 6px;
 }
 .page-title {
-    font-size: 26px;
-    font-weight: 700;
-    color: #303133;
+    font-size: 28px;
+    font-weight: 800;
+    color: #1A1A1A;
     margin: 0;
-    letter-spacing: -0.3px;
+    letter-spacing: -0.5px;
 }
 .page-subtitle {
-    font-size: 14px;
-    color: #909399;
+    font-size: 15px;
+    color: #606266;
     margin: 0;
+    font-weight: 500;
 }
 
 /* 新建按钮 */
 .btn-create {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 12px 24px;
+    gap: 8px;
+    padding: 14px 28px;
     border: none;
-    border-radius: 8px;
-    background: #3385FF;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #3385FF 0%, #1A6FFF 100%);
     color: #fff;
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 700;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: all 0.2s ease;
     flex-shrink: 0;
     font-family: inherit;
     outline: none;
+    box-shadow: 0 4px 12px rgba(51, 133, 255, 0.3);
 }
-.btn-create:hover { background: #1A6FFF; }
+.btn-create:hover { 
+    background: linear-gradient(135deg, #1A6FFF 0%, #0052CC 100%);
+    box-shadow: 0 6px 16px rgba(51, 133, 255, 0.4);
+    transform: translateY(-1px);
+}
 .btn-create-icon {
     font-size: 20px;
     font-weight: 400;
@@ -379,13 +393,15 @@ onMounted(() => {
     display: flex;
     align-items: center;
     background: #fff;
-    border: 1px solid #DCDFE6;
-    border-radius: 8px;
-    padding: 0 14px;
-    transition: border-color 0.15s;
+    border: 2px solid #E4E7ED;
+    border-radius: 10px;
+    padding: 0 16px;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
 }
 .search-box:focus-within {
     border-color: #3385FF;
+    box-shadow: 0 2px 8px rgba(51, 133, 255, 0.1);
 }
 .search-icon {
     font-size: 16px;
@@ -414,19 +430,24 @@ onMounted(() => {
 .search-clear:hover { color: #909399; }
 
 .sort-select {
-    width: 150px;
-    padding: 0 12px;
-    border: 1px solid #DCDFE6;
-    border-radius: 8px;
-    font-size: 13px;
-    color: #606266;
+    width: 160px;
+    padding: 10px 14px;
+    border: 2px solid #E4E7ED;
+    border-radius: 10px;
+    font-size: 14px;
+    color: #303133;
+    font-weight: 500;
     background: #fff;
     outline: none;
     cursor: pointer;
     font-family: inherit;
-    transition: border-color 0.15s;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
 }
-.sort-select:focus { border-color: #3385FF; }
+.sort-select:focus { 
+    border-color: #3385FF;
+    box-shadow: 0 2px 8px rgba(51, 133, 255, 0.1);
+}
 
 /* ===== 卡片网格 ===== */
 .conversation-grid {
@@ -438,18 +459,20 @@ onMounted(() => {
 /* ===== 对话卡片 ===== */
 .conv-card {
     background: #fff;
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 20px;
-    border: 1px solid #EBEEF5;
+    border: 2px solid #E4E7ED;
     cursor: pointer;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition: all 0.2s ease;
     display: flex;
     flex-direction: column;
     gap: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 .conv-card:hover {
-    border-color: #C6D6F0;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    border-color: #3385FF;
+    box-shadow: 0 4px 16px rgba(51, 133, 255, 0.12);
+    transform: translateY(-2px);
 }
 
 /* 卡片顶部 */
@@ -471,35 +494,38 @@ onMounted(() => {
     flex-shrink: 0;
 }
 .conv-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #303133;
+    font-size: 17px;
+    font-weight: 700;
+    color: #000000;
     margin: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    letter-spacing: -0.2px;
+    line-height: 1.4;
 }
 .conv-title.is-default {
-    color: #C0C4CC;
-    font-weight: 400;
+    color: #000000;
+    font-weight: 500;
 }
 
 /* 已有行程徽章 */
 .conv-itinerary-badge {
-    padding: 2px 10px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 500;
-    color: #67C23A;
-    background: #F0F9EB;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1890FF;
+    background: #E6F7FF;
+    border: 1px solid #91D5FF;
     flex-shrink: 0;
     white-space: nowrap;
 }
 
 /* 描述 */
 .conv-desc {
-  font-size: 13px;
-  color: #606266;
+  font-size: 14px;
+  color: #4A4A4A;
   margin: 0;
   line-height: 1.6;
   display: -webkit-box;
@@ -507,26 +533,28 @@ onMounted(() => {
   line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 20px;
+  min-height: 22px;
+  font-weight: 500;
 }
 .conv-desc.is-empty {
-    color: #C0C4CC;
+    color: #A8ABB2;
 }
 
 /* 标签 */
 .conv-tags {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     flex-wrap: wrap;
 }
 .conv-tag {
     display: inline-block;
-    padding: 2px 10px;
-    border-radius: 4px;
-    font-size: 11px;
-    color: #409EFF;
-    background: #ECF5FF;
-    border: 1px solid #D9ECFF;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1A6FFF;
+    background: #E8F0FE;
+    border: 1px solid #C6D6F0;
 }
 
 /* 底部操作栏 */
@@ -543,33 +571,43 @@ onMounted(() => {
     gap: 14px;
 }
 .conv-stat {
-    font-size: 12px;
-    color: #909399;
+    font-size: 13px;
+    color: #606266;
+    font-weight: 500;
 }
 .conv-actions {
     display: flex;
     gap: 8px;
 }
 .conv-action-btn {
-    padding: 4px 12px;
-    border: 1px solid #E4E7ED;
-    border-radius: 4px;
+    padding: 6px 14px;
+    border: 1px solid #D9ECFF;
+    border-radius: 6px;
     background: #fff;
-    color: #606266;
-    font-size: 12px;
+    color: #1A6FFF;
+    font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: all 0.2s ease;
     font-family: inherit;
     outline: none;
 }
 .conv-action-btn:hover {
-    border-color: #409EFF;
-    color: #409EFF;
+    border-color: #3385FF;
+    color: #3385FF;
+    background: #F0F7FF;
+    box-shadow: 0 2px 6px rgba(51, 133, 255, 0.15);
 }
 .conv-action-btn.is-danger:hover {
     border-color: #F56C6C;
     color: #F56C6C;
     background: #FEF0F0;
+    box-shadow: 0 2px 6px rgba(245, 108, 108, 0.15);
+}
+.conv-action-hint {
+    font-size: 12px;
+    cursor: help;
+    opacity: 0.6;
 }
 
 /* ===== 空状态 ===== */
@@ -578,40 +616,47 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 72px 24px;
+    padding: 80px 24px;
     background: #fff;
-    border-radius: 10px;
-    border: 1px solid #EBEEF5;
+    border-radius: 12px;
+    border: 2px solid #E4E7ED;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 .empty-icon {
-    font-size: 44px;
-    margin-bottom: 14px;
+    font-size: 48px;
+    margin-bottom: 16px;
 }
 .empty-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #606266;
-    margin: 0 0 6px;
+    font-size: 18px;
+    font-weight: 700;
+    color: #303133;
+    margin: 0 0 8px;
 }
 .empty-desc {
-    font-size: 13px;
-    color: #909399;
-    margin: 0 0 20px;
+    font-size: 14px;
+    color: #606266;
+    margin: 0 0 24px;
     text-align: center;
     line-height: 1.6;
+    font-weight: 500;
 }
 .empty-create-btn {
-    padding: 10px 24px;
+    padding: 12px 28px;
     border: none;
-    border-radius: 6px;
-    background: #3385FF;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #3385FF 0%, #1A6FFF 100%);
     color: #fff;
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 15px;
+    font-weight: 600;
     cursor: pointer;
     font-family: inherit;
-    transition: background 0.15s;
+    transition: all 0.2s ease;
     outline: none;
+    box-shadow: 0 4px 12px rgba(51, 133, 255, 0.3);
 }
-.empty-create-btn:hover { background: #1A6FFF; }
+.empty-create-btn:hover { 
+    background: linear-gradient(135deg, #1A6FFF 0%, #0052CC 100%);
+    box-shadow: 0 6px 16px rgba(51, 133, 255, 0.4);
+    transform: translateY(-1px);
+}
 </style>

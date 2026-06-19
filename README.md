@@ -21,6 +21,7 @@ IntelliTravel Pioneer 是一个**AI Agent应用**，核心流程分两条路径�
 - **自然对话体验**: 修改行程时隐藏原始思考过程，输出结构化自然语言总结
 - **多轮对话**: 支持持续对话优化行程
 - **技能系统**: 可扩展的技能插件机制
+- **跨对话知识共享**: 用户可设置全局偏好，在所有对话中生效
 
 ## 技术架构
 
@@ -69,7 +70,8 @@ agent-project/
 │   │   │   ├── SocialController.java        # 社交管理
 │   │   │   ├── ToolsController.java         # 工具管理
 │   │   │   ├── UserController.java          # 用户管理
-│   │   │   └── UserHealthController.java    # 用户健康
+│   │   │   ├── UserHealthController.java    # 用户健康
+│   │   │   └── UserGlobalPreferenceController.java  # 全局偏好设置
 │   │   ├── service/              # 业务逻辑层（包含多个服务类）
 │   │   │   ├── ai/               # AI客户端（Agent Loop + Prompt + 意图识别）
 │   │   │   │   ├── TripPlanningAiClient.java       # AI客户端接口
@@ -93,7 +95,8 @@ agent-project/
 │   │   │   ├── ToolManagementService.java # 工具管理服务
 │   │   │   ├── TripSummaryService.java    # 行程摘要服务
 │   │   │   ├── UserHealthService.java     # 用户健康服务
-│   │   │   └── UserService.java           # 用户服务
+│   │   │   ├── UserService.java           # 用户服务
+│   │   │   └── UserGlobalPreferenceService.java  # 全局偏好服务
 │   │   ├── repository/           # 数据访问层
 │   │   ├── po/                   # 持久化对象
 │   │   ├── vo/                   # 视图对象
@@ -107,6 +110,8 @@ agent-project/
 ├── planclient/                   # 前端Vue.js项目
 │   ├── src/
 │   │   ├── api/                  # API接口封装
+│   │   ├── itinerary.ts           # 行程API
+│   │   ├── preference.ts          # 全局偏好API
 │   │   ├── components/           # 通用组件
 │   │   ├── composables/          # 组合式函数（useConversation/useDragDrop/useItinerary）
 │   │   ├── constants/            # 常量定义（工具名称/图标映射）
@@ -116,7 +121,9 @@ agent-project/
 │   │   ├── utils/                # 工具函数
 │   │   └── views/                # 页面组件
 │   │       ├── conversation/     # 对话历史列表
-│   │       ├── user/             # 用户登录/注册
+│   │       ├── user/             # 用户登录/注册/偏好设置
+│   │       │   ├── Dashboard.vue       # 首页仪表盘
+│   │       │   └── UserPreferences.vue # 全局偏好设置页面
 │   │       └── workspace/        # 工作区（核心页面集合）
 │   │           ├── Workspace.vue         # AI行程规划工作台
 │   │           ├── ItineraryCanvas.vue   # 行程画布（时间线+拖拽编辑）
@@ -142,6 +149,7 @@ agent-project/
 | `/battle/skills` | SkillManage | 技能工作台 |
 | `/tools` | ToolsManagement | 工具管理 |
 | `/conversation` | ConversationList | 对话历史列表 |
+| `/preferences` | UserPreferences | 全局偏好设置 |
 
 ## 核心功能
 
@@ -293,9 +301,9 @@ Phase 3: VERIFY（审核阶段）
 
 ## 数据库设计
 
-包含15张核心表：
+包含16张核心表：
 
-- **用户系统**: user, user_health, user_follow, user_friend
+- **用户系统**: user, user_health, user_follow, user_friend, user_global_preference
 - **行程系统**: itinerary, real_time_trip, trip_trajectory_map
 - **对话系统**: conversation, conversation_message
 - **社区系统**: community_post, community_comment, community_like
@@ -347,6 +355,18 @@ Phase 3: VERIFY（审核阶段）
 | GET | `/api/tools/list` | 获取工具列表 |
 | POST | `/api/tools/{id}/toggle` | 启用/禁用工具 |
 
+### 全局偏好模块 (`/api/preference`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/preference` | 获取用户所有偏好 |
+| GET | `/api/preference/{category}` | 获取指定类别偏好 |
+| GET | `/api/preference/categories` | 获取所有可用类别定义 |
+| POST | `/api/preference` | 保存或更新偏好 |
+| POST | `/api/preference/batch` | 批量保存偏好 |
+| PUT | `/api/preference/{category}/{key}/toggle` | 切换偏好启用状态 |
+| DELETE | `/api/preference/{category}/{key}` | 删除偏好 |
+
 ### 地图模块 (`/api/amap`)
 
 | 方法 | 路径 | 说明 |
@@ -391,8 +411,8 @@ npm run dev
 ## 项目状态
 
 **当前版本**: 活跃开发中
-**最后更新**: 2026年6月18日
-**主要方向**: Agent架构优化、意图识别增强、前端体验提升
+**最后更新**: 2026年6月19日
+**主要方向**: Agent架构优化、意图识别增强、前端体验提升、跨对话知识共享
 
 ## 许可证
 

@@ -96,7 +96,7 @@ public class ItineraryServiceImpl implements ItineraryService {
                 return result;
             }
             
-            finalizeConversation(ctx, token, result.getPlan(), true);
+            finalizeConversation(ctx, token, result.getPlan(), true, result.getChatAnswer());
             result.setConversationId(ctx.conversationId);
             return result;
         } catch (Exception e) {
@@ -121,13 +121,36 @@ public class ItineraryServiceImpl implements ItineraryService {
             throw new IntellitravelException("request body is required");
         }
 
-        ConversationContext ctx = createConversation(token, request, false);
+        // 复用已有对话（纯聊天场景下后续消息不再创建新对话）
+        boolean reuseExisting = request.getConversationId() != null && !request.getConversationId().isBlank();
+        ConversationContext ctx;
+        if (reuseExisting) {
+            ctx = reuseConversation(token, request.getConversationId(), request, request.getUserPrompt());
+        } else {
+            ctx = createConversation(token, request, false);
+        }
         java.util.function.Consumer<String> wrappedNotifier = buildNotifier(ctx, toolNotifier);
 
         try {
             GenerationResult result = tripPlanningAiClient.generateItineraryWithStats(
                     token, request, wrappedNotifier);
-            finalizeConversation(ctx, token, result.getPlan(), false);
+
+            // 如果是聊天回答（plan为null），保存实际聊天内容而非模板摘要
+            if (result.getPlan() == null && result.getChatAnswer() != null) {
+                if (ctx.conversationId != null) {
+                    try {
+                        conversationService.addMessage(token, ctx.conversationId,
+                                AgentMessageCreateRequest.builder()
+                                        .role("assistant")
+                                        .content(result.getChatAnswer())
+                                        .build());
+                    } catch (Exception ignored) {}
+                }
+                result.setConversationId(ctx.conversationId);
+                return result;
+            }
+
+            finalizeConversation(ctx, token, result.getPlan(), false, result.getChatAnswer());
             result.setConversationId(ctx.conversationId);
             return result;
         } catch (Exception e) {
@@ -157,7 +180,8 @@ public class ItineraryServiceImpl implements ItineraryService {
                     .description(buildConversationDescription(request, isModify))
                     .build());
 
-            String userContent = buildNiceUserMessage(request, isModify);
+            // 保存用户消息：优先使用原始用户输入（userPrompt），保留实际对话内容
+            String userContent = buildNiceUserMessage(request, isModify, request.getUserPrompt());
             conversationService.addMessage(token, convVO.getId(),
                     AgentMessageCreateRequest.builder()
                             .role("user")
@@ -215,10 +239,10 @@ public class ItineraryServiceImpl implements ItineraryService {
     }
 
     private void finalizeConversation(ConversationContext ctx, String token,
-            ItineraryPlan plan, boolean isModify) {
+            ItineraryPlan plan, boolean isModify, String chatAnswer) {
         if (ctx.conversationId == null) return;
         try {
-            String summary = buildAiSummary(plan, ctx, isModify);
+            String summary = buildAiSummary(plan, ctx, isModify, chatAnswer);
             conversationService.addMessage(token, ctx.conversationId,
                     AgentMessageCreateRequest.builder()
                             .role("assistant")
@@ -239,8 +263,13 @@ public class ItineraryServiceImpl implements ItineraryService {
         }
     }
 
-    private String buildAiSummary(ItineraryPlan plan, ConversationContext ctx, boolean isModify) {
-        // 计划和对话分离：对话区只显示固定提示，行程细节在右侧画布查看
+    private String buildAiSummary(ItineraryPlan plan, ConversationContext ctx, boolean isModify, String chatAnswer) {
+        // 如果有AI生成的聊天回答（包含自定义规则），直接使用
+        if (chatAnswer != null && !chatAnswer.isBlank()) {
+            return chatAnswer;
+        }
+        
+        // 否则使用固定模板
         StringBuilder sb = new StringBuilder();
         if (isModify) {
             sb.append("✅ 行程已根据你的要求优化！你可以在右侧画布中查看更新后的行程。");
@@ -266,20 +295,16 @@ public class ItineraryServiceImpl implements ItineraryService {
         }
     }
 
-    private String buildNiceUserMessage(ItineraryRequest request, boolean isModify) {
-        return buildNiceUserMessage(request, isModify, null);
-    }
-
     private String buildNiceUserMessage(ItineraryRequest request, boolean isModify, String userPrompt) {
+        // 优先保存用户实际输入的原始文本，保持对话历史的真实性
+        if (userPrompt != null && !userPrompt.isBlank()) {
+            return userPrompt.trim();
+        }
+
+        // 降级：没有原始用户输入时，使用格式化模板
         StringBuilder sb = new StringBuilder();
         if (isModify) {
-            if (userPrompt != null && !userPrompt.isBlank()) {
-                sb.append(userPrompt).append("\n\n");
-            } else {
-                sb.append("请帮我修改已有的行程方案。\n");
-            }
-            // For modify, the current itinerary JSON is sent in a separate message,
-            // so we skip the structured fields (destination/days/budget) to keep it clean.
+            sb.append("请帮我修改已有的行程方案。");
             return sb.toString().trim();
         } else {
             sb.append("请帮我规划旅行方案。\n");
@@ -303,6 +328,20 @@ public class ItineraryServiceImpl implements ItineraryService {
     }
 
     private String buildConversationTitle(ItineraryRequest request, boolean isModify) {
+        // 优先使用用户输入的原始文本生成标题
+        String userPrompt = request.getUserPrompt();
+        if (userPrompt != null && !userPrompt.isBlank()) {
+            String trimmed = userPrompt.trim();
+            // 如果用户输入较短（<=30字符），直接作为标题
+            if (trimmed.length() <= 30) {
+                return isModify ? "修改：" + trimmed : trimmed;
+            }
+            // 如果用户输入较长，提取前30字符并添加省略号
+            String shortTitle = trimmed.substring(0, 30) + "...";
+            return isModify ? "修改：" + shortTitle : shortTitle;
+        }
+        
+        // 降级：使用目的地和天数组合
         StringBuilder title = new StringBuilder();
         if (isModify) {
             title.append("修改行程 - ");
@@ -536,6 +575,19 @@ public class ItineraryServiceImpl implements ItineraryService {
 
         if (!existingItinerary.getUserId().equals(userId)) {
             throw new IntellitravelException("access denied: itinerary does not belong to user");
+        }
+
+        // 级联删除关联的对话历史
+        String conversationId = existingItinerary.getConversationId();
+        if (conversationId != null && !conversationId.isBlank()) {
+            try {
+                conversationService.deleteConversation(token, conversationId);
+                System.out.println("[Itinerary] Cascade deleted conversation: " + conversationId);
+            } catch (Exception e) {
+                // 对话删除失败不影响行程删除，仅记录日志
+                System.err.println("[Itinerary] Failed to cascade delete conversation " 
+                    + conversationId + ": " + e.getMessage());
+            }
         }
 
         itineraryRepository.deleteById(itineraryId);

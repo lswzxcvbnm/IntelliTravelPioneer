@@ -32,6 +32,8 @@ public class MemoryManager {
     private ConversationService conversationService;
     @Autowired
     private UserLongTermMemoryRepository longTermMemoryRepository;
+    @Autowired
+    private UserGlobalPreferenceService globalPreferenceService;
     // ==================== 短期记忆（当前对话） ====================
     public List<AgentMessageVO> getShortTermMemory(String conversationId) {
         List<AgentMessageVO> allMessages = conversationService.getConversationMessages(null, conversationId);
@@ -144,6 +146,16 @@ public class MemoryManager {
                         .orElse("");
                 sb.append("- 偏好类型：").append(topType).append("\n");
             }
+        }
+
+        // 添加用户全局偏好（跨对话知识共享）
+        try {
+            String globalPreferences = globalPreferenceService.buildGlobalPreferenceContext(String.valueOf(userId));
+            if (globalPreferences != null && !globalPreferences.isBlank()) {
+                sb.append(globalPreferences);
+            }
+        } catch (Exception e) {
+            log.warn("【长期记忆】获取用户全局偏好失败: {}", e.getMessage());
         }
 
         return sb.toString();

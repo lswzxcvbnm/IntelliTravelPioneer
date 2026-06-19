@@ -22,6 +22,7 @@ const navItems = [
   { path: '/conversation', label: '对话历史', icon: '💬' },
   { path: '/battle/skills', label: '技能工作台', icon: '🧩' },
   { path: '/tools', label: '工具管理', icon: '🔧' },
+  { path: '/preferences', label: '全局偏好', icon: '🎯' },
 ]
 
 const goCreate = () => {

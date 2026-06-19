@@ -6,6 +6,7 @@ import Register from '../views/user/Register.vue'
 const BattleCockpit = () => import('../views/battle/BattleCockpit.vue')
 const ToolsManagement = () => import('../views/battle/ToolsManagement.vue')
 const SkillManage = () => import('../views/battle/SkillManage.vue')
+const UserPreferences = () => import('../views/user/UserPreferences.vue')
 
 const Workspace = () => import('../views/workspace/Workspace.vue')
 
@@ -60,6 +61,11 @@ const router = createRouter({
       component: () => import('../views/conversation/ConversationList.vue')
     },
     {
+      path: '/preferences',
+      name: 'UserPreferences',
+      component: UserPreferences
+    },
+    {
       path: '/workspace',
       name: 'Workspace',
       component: Workspace
@@ -73,6 +79,7 @@ const routesRequireAuth = [
   '/battle/create',
   '/tools',
   '/conversation',
+  '/preferences',
   '/workspace'
 ]
 

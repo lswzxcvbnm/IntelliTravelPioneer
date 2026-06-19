@@ -166,8 +166,22 @@
           />
 
           <!-- ====== 模式 B: 自然语言对话 ====== -->
+          <!-- 技能选择栏（对话模式下可用） -->
+          <div v-if="inputMode === 'chat' && mySkills.length > 0" class="ws-skill-bar">
+            <span class="ws-skill-bar-label">🧩 技能</span>
+            <div class="ws-skill-chips">
+              <button
+                v-for="skill in mySkills"
+                :key="skill.id"
+                class="ws-skill-chip"
+                :class="{ active: selectedSkillIds.includes(skill.id) }"
+                :disabled="isGenerating || isRefining"
+                @click="toggleSkillSelection(skill.id)"
+              >{{ skill.name }}</button>
+            </div>
+          </div>
           <ChatInput
-            v-else
+            v-if="inputMode === 'chat'"
             :placeholder="inputPlaceholder"
             :disabled="isGenerating || isRefining"
             :isGenerating="isGenerating"
@@ -308,6 +322,7 @@ const currentThinkingLogs = ref<ThinkingLog[]>([])
 
 // ===== 技能状态 =====
 const mySkills = ref<SkillVO[]>([])
+const selectedSkillIds = ref<string[]>([])
 
 // ===== 输入模式（表单 / 对话） =====
 // 如果是延续对话（有 convId），默认使用对话模式
@@ -340,14 +355,40 @@ function parseToolType(toolCallsStr: string | null): 'itinerary' | 'tools' | nul
 
 // ===== 用户请求解析 =====
 function extractDestination(text: string): string {
-  const cityPatterns = [
-    /北京|上海|南京|杭州|成都|西安|重庆|武汉|长沙|苏州|天津|青岛|大连|宁波|厦门|深圳|广州|佛山/,
-    /[一-龥]{2,4}(?:市|)/,
+  // 明确的城市列表（主要城市）
+  const majorCities = [
+    '北京', '上海', '南京', '杭州', '成都', '西安', '重庆', '武汉', '长沙', 
+    '苏州', '天津', '青岛', '大连', '宁波', '厦门', '深圳', '广州', '佛山',
+    '昆明', '大理', '丽江', '三亚', '桂林', '贵阳', '兰州', '拉萨', '乌鲁木齐',
+    '哈尔滨', '长春', '沈阳', '济南', '郑州', '合肥', '福州', '南昌', '太原',
+    '石家庄', '呼和浩特', '银川', '西宁', '海口', '香港', '澳门', '台北'
   ]
-  for (const p of cityPatterns) {
-    const m = text.match(p)
-    if (m) return m[0].replace(/市$/, '')
+  
+  // 排除词列表（常见非城市名词）
+  const excludeWords = [
+    '去处', '地方', '景点', '景区', '旅游', '旅行', '游玩', '玩', '游',
+    '什么', '哪里', '哪儿', '好玩', '推荐', '建议', '攻略', '路线',
+    '行程', '计划', '规划', '安排', '天', '日', '晚', '夜'
+  ]
+  
+  // 先匹配明确的城市
+  for (const city of majorCities) {
+    if (text.includes(city)) return city
   }
+  
+  // 匹配"XX市"格式
+  const cityWithSuffix = text.match(/([\u4e00-\u9fa5]{2,4})市/)
+  if (cityWithSuffix) return cityWithSuffix[1]
+  
+  // 匹配"去XX"或"到XX"格式，但排除常见非城市名词
+  const goToCity = text.match(/(?:去|到|在|游|玩)([\u4e00-\u9fa5]{2,4})(?:旅游|旅行|游玩|玩|游)?/)
+  if (goToCity) {
+    const candidate = goToCity[1]
+    // 检查是否在排除词列表中
+    const isExcluded = excludeWords.some(word => candidate.includes(word))
+    if (!isExcluded) return candidate
+  }
+  
   return ''
 }
 
@@ -373,14 +414,23 @@ function extractInterests(text: string): string[] {
   return interests
 }
 
+function toggleSkillSelection(skillId: string) {
+  const idx = selectedSkillIds.value.indexOf(skillId)
+  if (idx >= 0) selectedSkillIds.value.splice(idx, 1)
+  else selectedSkillIds.value.push(skillId)
+}
+
 function parseUserRequest(text: string): ItineraryRequest {
+  // 只传递原始用户输入，让后端AI来判断意图和提取结构化信息
   return {
-    destination: extractDestination(text) || '未指定',
-    days: extractDays(text) || 3,
-    budgetLevel: extractBudget(text),
-    interests: extractInterests(text),
+    destination: '未指定',  // 后端会用AI提取
+    days: 3,  // 后端会用AI提取
+    budgetLevel: 'medium',
+    interests: [],
     additionalNotes: text,
     userPrompt: text,  // 关键：传递原始用户输入给后端意图分类器
+    conversationId: convId.value || undefined,  // 传递已有对话ID，避免重复创建对话
+    skillIds: selectedSkillIds.value.length > 0 ? [...selectedSkillIds.value] : undefined,
   } as ItineraryRequest
 }
 
@@ -391,6 +441,7 @@ function buildRequestFromPlan(): ItineraryRequest {
     budgetLevel: 'medium',
     interests: [],
     additionalNotes: '',
+    skillIds: selectedSkillIds.value.length > 0 ? [...selectedSkillIds.value] : undefined,
   }
 }
 
@@ -615,6 +666,9 @@ async function runRefine(msgId: string, userPrompt: string) {
   currentMsgId.value = msgId
   currentThinkingLogs.value = []
 
+  // 标记是否已收到聊天回答（避免 onResult 覆盖）
+  let receivedChatAnswer = false
+
   try {
     const originalPlan = { ...editablePlan.value } as ItineraryPlan
 
@@ -640,7 +694,10 @@ async function runRefine(msgId: string, userPrompt: string) {
         // 如果 plan 为 null，可能是聊天回答，跳过行程更新
         if (plan) {
           editablePlan.value = mergeRefinedPlan(originalPlan, normalizePlan(plan))
-          updateMessage(msgId, { content: '✅ 行程已根据你的要求优化！你可以在右侧画布中查看更新后的行程。', streaming: false })
+          // 如果已收到聊天回答（如拒绝消息），不覆盖为模板
+          if (!receivedChatAnswer) {
+            updateMessage(msgId, { content: '✅ 行程已根据你的要求优化！你可以在右侧画布中查看更新后的行程。', streaming: false })
+          }
         }
       },
       (error) => {
@@ -654,7 +711,8 @@ async function runRefine(msgId: string, userPrompt: string) {
       },
       (cid) => { convId.value = cid },
       (chatAnswer) => {
-        // 收到聊天回答，直接显示
+        // 收到聊天回答（如拒绝消息或闲聊），直接显示
+        receivedChatAnswer = true
         updateMessage(msgId, { content: chatAnswer, streaming: false })
       }
     )
@@ -1443,6 +1501,63 @@ onBeforeRouteLeave(async (to, from, next) => {
 .ws-mode-tab:disabled { opacity: 0.4; cursor: not-allowed; }
 .ws-mode-icon { font-size: 16px; }
 
+/* ====== 技能选择栏（对话模式） ====== */
+.ws-skill-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  background: #FAFCFF;
+  border: 1px solid rgba(51, 133, 255, 0.08);
+  border-radius: 12px;
+}
 
+.ws-skill-bar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #7A8FA6;
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
+}
+
+.ws-skill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+}
+
+.ws-skill-chip {
+  padding: 5px 12px;
+  border: 1.5px solid #DDE6F0;
+  border-radius: 20px;
+  background: #F8FBFF;
+  color: #6B8CBE;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  white-space: nowrap;
+  outline: none;
+}
+
+.ws-skill-chip:hover:not(:disabled) {
+  border-color: #99BBEA;
+  color: #4A72BA;
+}
+
+.ws-skill-chip.active {
+  background: #7c3aed;
+  color: #fff;
+  border-color: #7c3aed;
+  box-shadow: 0 3px 10px rgba(124, 58, 237, 0.3);
+}
+
+.ws-skill-chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 </style>
