@@ -67,7 +67,7 @@ IntelliTravel Pioneer后端是AI旅行规划系统的核心服务，采用ReAct 
 |----------|------|------------|
 | `DELETE` | 删除条目 | "删除""去掉""移除""删掉" |
 | `ADD` | 新增条目 | "增加""添加""新增" |
-| `UPDATE_DAYS` | 更新天数 | "改为X天""多玩一天""少玩一天""延长""缩短" |
+| `UPDATE_DAYS` | 更新天数 | "改为X天""多玩一天""少玩一天""延长""缩短""添加一天""增加一天""多出一天""多玩一天" |
 | `MODIFY` | 修改条目 | "改成""换成""修改""变为" |
 | `UNKNOWN` | 未知操作 | Agent自行判断 |
 
@@ -75,7 +75,7 @@ IntelliTravel Pioneer后端是AI旅行规划系统的核心服务，采用ReAct 
 
 - **明确数字**：`改为5天` → 5天
 - **相对表达**：`多玩一天` → 当前天数 + 1
-- **自然语言**：`再加一天`、`延长行程`、`缩短行程`
+- **自然语言**：`再加一天`、`延长行程`、`缩短行程`、`添加一天`、`增加一天`、`多出一天`、`多玩一天`
 
 #### 操作记录
 
@@ -124,6 +124,7 @@ IntelliTravel Pioneer后端是AI旅行规划系统的核心服务，采用ReAct 
 
 ```
 intellitravel-pioneer/
+├── request/                      # 请求示例
 ├── src/main/java/com/travel/intellitravel_pioneer/
 │   ├── controller/           # REST控制器
 │   │   ├── AmapController.java          # 地图API
@@ -141,7 +142,11 @@ intellitravel-pioneer/
 │   ├── service/              # 业务逻辑层（包含多个服务类）
 │   │   ├── ai/               # AI客户端（Agent Loop + Prompt + 意图识别）
 │   │   │   ├── TripPlanningAiClient.java       # AI客户端接口
-│   │   │   └── HttpTripPlanningAiClient.java   # 实现（含全部Prompt模板）
+│   │   │   ├── HttpTripPlanningAiClient.java   # 实现（含全部Prompt模板）
+│   │   │   ├── TripSummaryAiClient.java        # 行程摘要AI接口
+│   │   │   ├── HttpTripSummaryAiClient.java    # 行程摘要AI实现
+│   │   │   ├── AiImageClient.java              # AI图片生成接口
+│   │   │   └── HttpAiImageClient.java          # AI图片生成实现
 │   │   ├── serviceImpl/      # 服务实现
 │   │   │   └── ItineraryServiceImpl.java       # 行程服务（意图识别入口）
 │   │   ├── IntentStateMachine.java    # 意图状态机
@@ -160,6 +165,9 @@ intellitravel-pioneer/
 │   │   ├── SocialService.java         # 社交服务
 │   │   ├── ToolManagementService.java # 工具管理服务
 │   │   ├── TripSummaryService.java    # 行程摘要服务
+│   │   ├── TripSummaryGenerationEvent.java      # 行程摘要生成事件
+│   │   ├── TripSummaryGenerationListener.java   # 行程摘要生成监听器
+│   │   ├── TripSummaryGenerationStateStore.java # 行程摘要生成状态存储
 │   │   ├── UserHealthService.java     # 用户健康服务
 │   │   ├── UserService.java           # 用户服务
 │   │   └── UserGlobalPreferenceService.java  # 全局偏好服务

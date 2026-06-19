@@ -157,6 +157,9 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         System.out.println(">>> conversationId: " + conversationId);
         System.out.println(">>> userPrompt: " + userPrompt);
 
+        // 保存原始用户输入，用于天数变更检测（结构化提示词可能丢失关键词）
+        final String originalUserPrompt = userPrompt;
+
         // AI意图分类：判断是修改行程还是闲聊
         if (userPrompt != null && !userPrompt.isBlank()) {
             String intentJson = classifyAndStructureModifyIntent(userPrompt, currentPlanJson);
@@ -357,10 +360,10 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 }
             }
 
-            if (conversationId != null && !conversationId.isBlank() && userPrompt != null) {
-                String tempActionType = detectActionType(userPrompt);
+            if (conversationId != null && !conversationId.isBlank() && originalUserPrompt != null) {
+                String tempActionType = detectActionType(originalUserPrompt);
                 if ("UPDATE_DAYS".equals(tempActionType)) {
-                    int daysResult = extractDaysFromPrompt(userPrompt);
+                    int daysResult = extractDaysFromPrompt(originalUserPrompt);
                     int oldDays = request.getDays();
                     int newDays;
                     if (daysResult > 0) {
@@ -389,7 +392,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             int maxExecuteRetries = 2;
             while (true) {
                 try {
-                    refinedPlan = runAgentLoop(token, messages, tools, mcpClient, request, toolNotifier, stats);
+                    refinedPlan = runAgentLoop(token, messages, tools, mcpClient, request, toolNotifier, stats, originalUserPrompt);
                     break;
                 } catch (IntellitravelException ie) {
                     throw ie;
@@ -1121,7 +1124,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
 
                 try {
-                    draftPlan = runAgentLoop(token, messages, tools, agentMcpClient, request, toolNotifier, stats);
+                    draftPlan = runAgentLoop(token, messages, tools, agentMcpClient, request, toolNotifier, stats, request.getUserPrompt());
 
                     if (conversationId != null && !conversationId.isBlank() && request.getUserPrompt() != null) {
                         String actionType = detectActionType(request.getUserPrompt());
@@ -1242,6 +1245,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 }
                 systemPrompt.append("\n");
             }
+            System.out.println(">>> [buildChatAnswerForPlan] 自定义规则数量: " + customRules.size());
 
             // 注入用户全局偏好
             try {
@@ -1249,10 +1253,16 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 String userProfile = memoryManager.buildUserProfileContext(userId);
                 if (userProfile != null && !userProfile.isBlank()) {
                     systemPrompt.append(userProfile).append("\n\n");
+                    System.out.println(">>> [buildChatAnswerForPlan] 用户全局偏好已注入，长度: " + userProfile.length());
+                } else {
+                    System.out.println(">>> [buildChatAnswerForPlan] 用户全局偏好为空");
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                System.out.println(">>> [buildChatAnswerForPlan] 获取用户全局偏好失败: " + ignored.getMessage());
+            }
 
             // 调用LLM生成回复
+            System.out.println(">>> [buildChatAnswerForPlan] 调用LLM生成聊天回复...");
             ObjectNode body = objectMapper.createObjectNode();
             body.put("model", llmModel);
             body.put("temperature", 0.7);
@@ -1271,6 +1281,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             String jsonBody = objectMapper.writeValueAsString(body);
             String requestUrl = llmBaseUrl + llmChatPath;
+            System.out.println(">>> [buildChatAnswerForPlan] LLM Request URL: " + requestUrl);
 
             String response = RestClient.create()
                     .post()
@@ -1283,15 +1294,20 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             JsonNode respJson = objectMapper.readTree(response);
             String content = respJson.path("choices").path(0).path("message").path("content").asText("");
+            System.out.println(">>> [buildChatAnswerForPlan] LLM回复: " + content);
 
             if (content != null && !content.isBlank()) {
                 return content.trim();
+            } else {
+                System.out.println(">>> [buildChatAnswerForPlan] LLM返回空回复，将使用模板");
             }
         } catch (Exception e) {
             System.err.println(">>> [DEBUG] buildChatAnswerForPlan LLM调用失败: " + e.getMessage());
+            e.printStackTrace();
         }
 
         // 兜底：LLM调用失败时返回简单模板
+        System.out.println(">>> [buildChatAnswerForPlan] 使用模板回复（LLM调用失败或返回空）");
         int days = plan.getDailyPlans() != null ? plan.getDailyPlans().size() : 0;
         String dest = plan.getDestination() != null ? plan.getDestination() : "您的目的地";
         return "已为您生成" + dest + "的" + days + "天行程。如需调整，请告诉我具体修改需求。";
@@ -1321,6 +1337,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 }
                 systemPrompt.append("\n");
             }
+            System.out.println(">>> [buildChatAnswerForModify] 自定义规则数量: " + customRules.size());
 
             // 注入用户全局偏好
             try {
@@ -1328,10 +1345,16 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 String userProfile = memoryManager.buildUserProfileContext(userId);
                 if (userProfile != null && !userProfile.isBlank()) {
                     systemPrompt.append(userProfile).append("\n\n");
+                    System.out.println(">>> [buildChatAnswerForModify] 用户全局偏好已注入，长度: " + userProfile.length());
+                } else {
+                    System.out.println(">>> [buildChatAnswerForModify] 用户全局偏好为空");
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                System.out.println(">>> [buildChatAnswerForModify] 获取用户全局偏好失败: " + ignored.getMessage());
+            }
 
             // 调用LLM生成回复
+            System.out.println(">>> [buildChatAnswerForModify] 调用LLM生成聊天回复...");
             ObjectNode body = objectMapper.createObjectNode();
             body.put("model", llmModel);
             body.put("temperature", 0.7);
@@ -1350,6 +1373,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             String jsonBody = objectMapper.writeValueAsString(body);
             String requestUrl = llmBaseUrl + llmChatPath;
+            System.out.println(">>> [buildChatAnswerForModify] LLM Request URL: " + requestUrl);
 
             String response = RestClient.create()
                     .post()
@@ -1362,15 +1386,20 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             JsonNode respJson = objectMapper.readTree(response);
             String content = respJson.path("choices").path(0).path("message").path("content").asText("");
+            System.out.println(">>> [buildChatAnswerForModify] LLM回复: " + content);
 
             if (content != null && !content.isBlank()) {
                 return content.trim();
+            } else {
+                System.out.println(">>> [buildChatAnswerForModify] LLM返回空回复，将使用模板");
             }
         } catch (Exception e) {
             System.err.println(">>> [DEBUG] buildChatAnswerForModify LLM调用失败: " + e.getMessage());
+            e.printStackTrace();
         }
 
         // 兜底：LLM调用失败时返回简单模板
+        System.out.println(">>> [buildChatAnswerForModify] 使用模板回复（LLM调用失败或返回空）");
         return "已根据您的要求调整了行程。如需进一步修改，请告诉我。";
     }
 
@@ -1469,7 +1498,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
     private ItineraryPlan runAgentLoop(String token, List<Map<String, Object>> messages, JsonNode tools,
             AmapMcpClient mcpClient, ItineraryRequest request,
-            java.util.function.Consumer<String> toolNotifier, GenerationStats stats) throws Exception {
+            java.util.function.Consumer<String> toolNotifier, GenerationStats stats, String userPrompt) throws Exception {
         boolean mcpUnavailable = (mcpClient == null);
         
         // 获取用户ID用于工具偏好检查
@@ -1851,7 +1880,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 if (plan != null && plan.getDestination() == null && request.getDestination() != null) {
                     plan.setDestination(request.getDestination());
                 }
-                return normalizePlan(plan, request, toolNotifier);
+                return normalizePlan(plan, request, toolNotifier, userPrompt);
             }
         }
     }
@@ -1861,12 +1890,26 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
     }
 
     private ItineraryPlan normalizePlan(ItineraryPlan plan, ItineraryRequest request,
-            java.util.function.Consumer<String> toolNotifier) {
+            java.util.function.Consumer<String> toolNotifier, String userPrompt) {
         if (plan == null || plan.getDailyPlans() == null || plan.getDailyPlans().isEmpty()) {
             return plan;
         }
         int requestedDays = request.getDays() != null ? request.getDays() : 1;
         int actualDays = plan.getDailyPlans().size();
+
+        // 检查用户是否明确要求增加天数
+        boolean userWantsMoreDays = false;
+        if (userPrompt != null && !userPrompt.isBlank()) {
+            String lowerPrompt = userPrompt.toLowerCase();
+            if (lowerPrompt.contains("增加一天") || lowerPrompt.contains("添加一天") || 
+                lowerPrompt.contains("多一天") || lowerPrompt.contains("加一天") ||
+                lowerPrompt.contains("增加天数") || lowerPrompt.contains("添加天数") ||
+                lowerPrompt.contains("多玩一天") || lowerPrompt.contains("再多一天") ||
+                lowerPrompt.contains("延长一天") || lowerPrompt.contains("多出一天") ||
+                lowerPrompt.contains("extend") || lowerPrompt.contains("add day")) {
+                userWantsMoreDays = true;
+            }
+        }
 
         if (actualDays != requestedDays) {
             System.out.println("Day count mismatch: user requested " + requestedDays
@@ -1877,7 +1920,12 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                             + "天，AI生成了" + actualDays + "天），正在自动修正...");
                 } catch (Exception ignored) {}
             }
-            if (actualDays > requestedDays) {
+            // 如果用户要求增加天数，且AI生成了更多天数，则不截断
+            if (userWantsMoreDays && actualDays > requestedDays) {
+                System.out.println("User wants more days, keeping " + actualDays + " days instead of truncating to " + requestedDays);
+                requestedDays = actualDays; // 更新请求天数
+                request.setDays(requestedDays); // 更新请求对象
+            } else if (actualDays > requestedDays) {
                 plan.setDailyPlans(new ArrayList<>(plan.getDailyPlans().subList(0, requestedDays)));
                 System.out.println("Truncated " + (actualDays - requestedDays)
                         + " extra day(s) from plan output");
@@ -3536,10 +3584,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 userPrompt.contains("移除") || userPrompt.contains("删掉")) {
             return "DELETE";
         }
-        if (userPrompt.contains("增加") || userPrompt.contains("添加") || userPrompt.contains("新增")) {
-            return "ADD";
-        }
-        // 天数变更：Pattern 匹配 + 自然表达
+        // 天数变更：Pattern 匹配 + 自然表达（必须在通用 ADD 检查之前，避免"添加一天"被误判为 ADD）
         Pattern daysPattern = Pattern.compile("(改为|改成|变为|增加|减少|调整到)\\s*(\\d+)\\s*天");
         Matcher daysMatcher = daysPattern.matcher(userPrompt);
         if (daysMatcher.find()) {
@@ -3553,8 +3598,14 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 userPrompt.contains("多一天") || userPrompt.contains("少一天") ||
                 userPrompt.contains("再加一天") || userPrompt.contains("延长") ||
                 userPrompt.contains("缩短") || userPrompt.contains("多几天") ||
-                userPrompt.contains("少几天")) {
+                userPrompt.contains("少几天") ||
+                userPrompt.contains("添加一天") || userPrompt.contains("增加一天") ||
+                userPrompt.contains("多出一天") || userPrompt.contains("多玩一天")) {
             return "UPDATE_DAYS";
+        }
+        // 通用地点增删检查（在天数检查之后）
+        if (userPrompt.contains("增加") || userPrompt.contains("添加") || userPrompt.contains("新增")) {
+            return "ADD";
         }
         if (userPrompt.contains("改成") || userPrompt.contains("换成") || userPrompt.contains("修改") ||
                 userPrompt.contains("变为")) {
@@ -3583,7 +3634,9 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
         }
         // 自然语言天数变更：多一天/少一天 → 返回 -1 表示相对变更，由调用方计算
         if (prompt.contains("多一天") || prompt.contains("多玩一天") || prompt.contains("加一天") ||
-                prompt.contains("再多一天") || prompt.contains("延长一天")) {
+                prompt.contains("再多一天") || prompt.contains("延长一天") ||
+                prompt.contains("添加一天") || prompt.contains("增加一天") ||
+                prompt.contains("多出一天") || prompt.contains("多玩一天")) {
             return -1; // 表示 +1 天
         }
         if (prompt.contains("少一天") || prompt.contains("少玩一天") || prompt.contains("减一天") ||

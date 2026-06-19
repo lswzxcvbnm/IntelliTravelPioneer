@@ -607,6 +607,9 @@ async function runGenerate(msgId: string, userPrompt: string) {
   currentMsgId.value = msgId
   currentThinkingLogs.value = []
 
+  // 标记是否已收到聊天回答（避免 onResult 覆盖）
+  let receivedChatAnswer = false
+
   try {
     const request = parseUserRequest(userPrompt)
 
@@ -629,7 +632,11 @@ async function runGenerate(msgId: string, userPrompt: string) {
         // 如果 plan 为 null，可能是聊天回答，跳过行程更新
         if (plan) {
           editablePlan.value = normalizePlan(plan)
-          updateMessage(msgId, { content: '✅ 行程方案已生成！你可以在右侧画布中查看和编辑。', streaming: false })
+          console.log('[Workspace] Received result, receivedChatAnswer:', receivedChatAnswer)
+          // 只有在没有收到聊天回答时，才使用模板
+          if (!receivedChatAnswer) {
+            updateMessage(msgId, { content: '✅ 行程方案已生成！你可以在右侧画布中查看和编辑。', streaming: false })
+          }
         }
       },
       (error) => {
@@ -644,6 +651,8 @@ async function runGenerate(msgId: string, userPrompt: string) {
       (cid) => { convId.value = cid },
       (chatAnswer) => {
         // 收到聊天回答，直接显示
+        console.log('[Workspace] Received chat answer:', chatAnswer)
+        receivedChatAnswer = true
         updateMessage(msgId, { content: chatAnswer, streaming: false })
       }
     )

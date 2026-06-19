@@ -58,6 +58,7 @@ IntelliTravel Pioneer 是一个**AI Agent应用**，核心流程分两条路径�
 ```
 agent-project/
 ├── intellitravel-pioneer/        # 后端Spring Boot项目
+│   ├── request/                  # 请求示例
 │   ├── src/main/java/            # Java源码
 │   │   ├── controller/           # REST控制器
 │   │   │   ├── AmapController.java          # 地图API
@@ -75,7 +76,11 @@ agent-project/
 │   │   ├── service/              # 业务逻辑层（包含多个服务类）
 │   │   │   ├── ai/               # AI客户端（Agent Loop + Prompt + 意图识别）
 │   │   │   │   ├── TripPlanningAiClient.java       # AI客户端接口
-│   │   │   │   └── HttpTripPlanningAiClient.java   # 实现（含全部Prompt模板）
+│   │   │   │   ├── HttpTripPlanningAiClient.java   # 实现（含全部Prompt模板）
+│   │   │   │   ├── TripSummaryAiClient.java        # 行程摘要AI接口
+│   │   │   │   ├── HttpTripSummaryAiClient.java    # 行程摘要AI实现
+│   │   │   │   ├── AiImageClient.java              # AI图片生成接口
+│   │   │   │   └── HttpAiImageClient.java          # AI图片生成实现
 │   │   │   ├── serviceImpl/      # 服务实现
 │   │   │   │   └── ItineraryServiceImpl.java       # 行程服务（意图识别入口）
 │   │   │   ├── IntentStateMachine.java    # 意图状态机
@@ -94,6 +99,9 @@ agent-project/
 │   │   │   ├── SocialService.java         # 社交服务
 │   │   │   ├── ToolManagementService.java # 工具管理服务
 │   │   │   ├── TripSummaryService.java    # 行程摘要服务
+│   │   │   ├── TripSummaryGenerationEvent.java      # 行程摘要生成事件
+│   │   │   ├── TripSummaryGenerationListener.java   # 行程摘要生成监听器
+│   │   │   ├── TripSummaryGenerationStateStore.java # 行程摘要生成状态存储
 │   │   │   ├── UserHealthService.java     # 用户健康服务
 │   │   │   ├── UserService.java           # 用户服务
 │   │   │   └── UserGlobalPreferenceService.java  # 全局偏好服务
@@ -102,7 +110,9 @@ agent-project/
 │   │   ├── vo/                   # 视图对象
 │   │   ├── dto/                  # 数据传输对象
 │   │   ├── configure/            # 配置类
-│   │   └── exception/            # 异常处理
+│   │   ├── enums/                # 枚举类
+│   │   ├── exception/            # 异常处理
+│   │   └── util/                 # 工具类
 │   ├── src/main/resources/       # 配置文件
 │   ├── pom.xml                   # Maven配置
 │   └── intellitravel.sql         # 数据库脚本
@@ -110,16 +120,29 @@ agent-project/
 ├── planclient/                   # 前端Vue.js项目
 │   ├── src/
 │   │   ├── api/                  # API接口封装
-│   │   ├── itinerary.ts           # 行程API
-│   │   ├── preference.ts          # 全局偏好API
+│   │   │   ├── itinerary.ts           # 行程API
+│   │   │   ├── conversation.ts        # 对话API
+│   │   │   ├── preference.ts          # 全局偏好API
+│   │   │   ├── skill.ts               # 技能API
+│   │   │   ├── tools.ts               # 工具API
+│   │   │   ├── trips.ts               # 行程API
+│   │   │   ├── user.ts                # 用户API
+│   │   │   └── _prefix.ts             # API前缀配置
 │   │   ├── components/           # 通用组件
-│   │   ├── composables/          # 组合式函数（useConversation/useDragDrop/useItinerary）
+│   │   ├── composables/          # 组合式函数
+│   │   │   ├── useBackHandler.ts      # 返回处理
+│   │   │   ├── useConversation.ts     # 对话管理
+│   │   │   ├── useDragDrop.ts         # 拖拽功能
+│   │   │   └── useItinerary.ts        # 行程管理
+│   │   ├── config/               # 配置文件
+│   │   │   └── api.ts                 # API基础URL配置
 │   │   ├── constants/            # 常量定义（工具名称/图标映射）
 │   │   ├── router/               # 路由配置
 │   │   ├── stores/               # Pinia状态管理
 │   │   ├── types/                # TypeScript类型
 │   │   ├── utils/                # 工具函数
 │   │   └── views/                # 页面组件
+│   │       ├── battle/           # 行程仓库
 │   │       ├── conversation/     # 对话历史列表
 │   │       ├── user/             # 用户登录/注册/偏好设置
 │   │       │   ├── Dashboard.vue       # 首页仪表盘
@@ -127,6 +150,7 @@ agent-project/
 │   │       └── workspace/        # 工作区（核心页面集合）
 │   │           ├── Workspace.vue         # AI行程规划工作台
 │   │           ├── ItineraryCanvas.vue   # 行程画布（时间线+拖拽编辑）
+│   │           ├── ItineraryCard.vue     # 行程卡片
 │   │           ├── FormInput.vue         # 结构化表单输入
 │   │           ├── ChatInput.vue         # 自然语言输入
 │   │           └── ToolCallCard.vue      # 工具调用展示

@@ -86,6 +86,7 @@ export function useConversation() {
     if (!msg) return
     
     msg.streaming = false
+    console.log('[useConversation] finalizeMessage, content length:', msg.content?.length, 'content:', msg.content?.substring(0, 100))
     if (!msg.content) {
       msg.content = '✅ 行程方案已生成！你可以在右侧画布中查看和编辑。'
     }

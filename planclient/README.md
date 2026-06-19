@@ -36,7 +36,13 @@ planclient/
 ├── src/
 │   ├── api/                  # API接口封装
 │   │   ├── itinerary.ts           # 行程API
-│   │   └── preference.ts          # 全局偏好API
+│   │   ├── conversation.ts        # 对话API
+│   │   ├── preference.ts          # 全局偏好API
+│   │   ├── skill.ts               # 技能API
+│   │   ├── tools.ts               # 工具API
+│   │   ├── trips.ts               # 行程API
+│   │   ├── user.ts                # 用户API
+│   │   └── _prefix.ts             # API前缀配置
 │   ├── components/           # 通用组件
 │   ├── composables/          # 组合式函数
 │   │   ├── useBackHandler.ts    # 返回处理
@@ -71,6 +77,7 @@ planclient/
 ├── index.html                # HTML入口
 ├── package.json              # 项目配置
 ├── tsconfig.json             # TypeScript配置
+├── tsconfig.app.json         # TypeScript应用配置
 ├── vite.config.ts            # Vite配置
 └── README.md
 ```
