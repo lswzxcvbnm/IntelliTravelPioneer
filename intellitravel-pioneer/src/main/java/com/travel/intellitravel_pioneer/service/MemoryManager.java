@@ -116,7 +116,7 @@ public class MemoryManager {
             for (ItineraryPO history : histories) {
                 ItineraryPlan plan = history.getPlan();
                 if (plan != null) {
-                    if (plan.getDestination() != null) {
+                    if (plan.getDestination() != null && !plan.getDestination().isBlank()) {
                         destFrequency.merge(plan.getDestination(), 1, Integer::sum);
                     }
                     if (plan.getDailyPlans() != null) {

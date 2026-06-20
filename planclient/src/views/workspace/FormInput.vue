@@ -155,7 +155,6 @@ watch(() => props.prefill, (val) => {
   if (val?.destination) {
     destination.value = val.destination
     if (val.days) days.value = val.days
-    isCollapsed.value = true
   }
 }, { immediate: true })
 </script>

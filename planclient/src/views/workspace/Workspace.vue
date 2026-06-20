@@ -847,8 +847,13 @@ async function fetchMySkills() {
 onMounted(async () => {
   const queryConvId = route.query.convId ? String(route.query.convId) : null
   const queryItineraryId = route.query.itineraryId ? String(route.query.itineraryId) : null
+  const queryDestination = route.query.destination ? String(route.query.destination) : null
 
-  console.log('[Workspace] onMounted - convId:', queryConvId, 'itineraryId:', queryItineraryId)
+  if (queryDestination) {
+    formPrefill.value = { destination: queryDestination }
+  }
+
+  console.log('[Workspace] onMounted - convId:', queryConvId, 'itineraryId:', queryItineraryId, 'destination:', queryDestination)
 
   // 优先从 convId 加载：恢复对话历史 + 关联行程
   if (queryConvId) {

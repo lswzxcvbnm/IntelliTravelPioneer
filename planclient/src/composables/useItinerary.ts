@@ -22,6 +22,7 @@ export function useItinerary() {
   function normalizePlan(plan: ItineraryPlan): ItineraryPlan {
     return {
       title: plan.title || '我的行程计划',
+      destination: plan.destination || '',
       estimatedCost: Number(plan.estimatedCost || 0),
       totalDays: Number(plan.totalDays || plan.dailyPlans?.length || 1),
       dailyPlans: plan.dailyPlans.map((day, index) => ({
@@ -101,6 +102,7 @@ export function useItinerary() {
 
     return {
       title: refined.title || original.title,
+      destination: refined.destination || original.destination || '',
       estimatedCost: refined.estimatedCost || original.estimatedCost,
       totalDays: finalDays.length,
       dailyPlans: finalDays.length > 0 ? finalDays : original.dailyPlans,

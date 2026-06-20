@@ -530,7 +530,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             - 最终用 final_output 包裹完整修正 JSON，中间不要有其他文字
 
             JSON 格式：
-            {"title":"...", "estimatedCost":1500.0, "totalDays":3,
+            {"title":"...", "destination":"目的地城市名", "estimatedCost":1500.0, "totalDays":3,
              "dailyPlans":[{"dayNumber":1, "items":[{"type":"景点|餐饮|住宿|购物",
              "name":"具体地点名称","description":"详细描述",
              "location":{"lat":39.9163,"lng":116.3971,"name":"位置名称"}}]}]}
@@ -624,13 +624,13 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
             OK 无模糊描述 -> [全部具体]
 
             final_output
-            {"title":"北京3天亲子游","estimatedCost":3000.0,"totalDays":3,"dailyPlans":[...]}
+            {"title":"北京3天亲子游","destination":"北京","estimatedCost":3000.0,"totalDays":3,"dailyPlans":[...]}
             /final_output
 
             【最终输出格式】
             用 final_output 标签包裹纯 JSON：
             final_output
-            {"title":"...", "estimatedCost":1500.0, "totalDays":N, "dailyPlans":[{"dayNumber":1, "items":[{"type":"景点|餐饮|住宿|购物","name":"具体地点名称","description":"详细描述（30字以内）","location":{"lat":39.9163,"lng":116.3971,"name":"位置名称"}}]}]}
+            {"title":"...", "destination":"目的地城市名", "estimatedCost":1500.0, "totalDays":N, "dailyPlans":[{"dayNumber":1, "items":[{"type":"景点|餐饮|住宿|购物","name":"具体地点名称","description":"详细描述（30字以内）","location":{"lat":39.9163,"lng":116.3971,"name":"位置名称"}}]}]}
             /final_output
             其中 N 必须严格等于用户 request 中的 days 字段值。""";
 
@@ -652,7 +652,7 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
 
             修正内容：[具体说明修正了哪些问题]
             final_output
-            {"title":"...", "estimatedCost":1500.0, "totalDays":N, "dailyPlans":[...]}
+            {"title":"...", "destination":"目的地城市名", "estimatedCost":1500.0, "totalDays":N, "dailyPlans":[...]}
             /final_output
 
             注意：修正时必须保持原行程的整体框架，只针对问题进行局部调整。""";
@@ -1169,6 +1169,10 @@ public class HttpTripPlanningAiClient implements TripPlanningAiClient {
                 draftPlan = verifyResult.correctedPlan;
                 int correctedDays = draftPlan.getDailyPlans() != null ? draftPlan.getDailyPlans().size() : 0;
                 verifySummary += "（行程已自动修正，现共" + correctedDays + "天）";
+            }
+            // 审核修正可能会丢失 destination，从 request 恢复
+            if (draftPlan != null && draftPlan.getDestination() == null && request.getDestination() != null && !"未指定".equals(request.getDestination())) {
+                draftPlan.setDestination(request.getDestination());
             }
 
             if (draftPlan != null && conversationId != null && !conversationId.isBlank()) {
