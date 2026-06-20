@@ -988,7 +988,10 @@ cd planclient/
 npm run build
 
 # 3. 备份旧文件（可选，方便回滚）
-ssh root@218.244.153.122 "cp -r /var/www/intellitravel/dist /var/www/intellitravel/dist.bak.$(date +%Y%m%d_%H%M%S)"
+# Linux/macOS shell:
+ssh root@218.244.153.122 'cp -r /var/www/intellitravel/dist /var/www/intellitravel/dist.bak.$(date +%Y%m%d_%H%M%S)'
+# Windows PowerShell:
+ssh root@218.244.153.122 "cp -r /var/www/intellitravel/dist /var/www/intellitravel/dist.bak.$(Get-Date -Format 'yyyyMMdd_HHmmss')"
 
 # 4. 上传新文件
 scp -r dist/* root@218.244.153.122:/var/www/intellitravel/dist/
@@ -1023,9 +1026,30 @@ ssh root@218.244.153.122 "sudo journalctl -u intellitravel -f"
 > ssh root@218.244.153.122 "cp /opt/intellitravel/intellitravel-pioneer-0.0.1-SNAPSHOT.jar /opt/intellitravel/intellitravel-pioneer-0.0.1-SNAPSHOT.jar.bak"
 > ```
 
-### 8.4 前后端同时更新
+### 8.4 前后端同时更新（推荐：使用一键部署脚本）
 
-合并 8.2 和 8.3 的操作：
+项目根目录下提供了 [deploy.ps1](../deploy.ps1)（Windows PowerShell），自动完成构建→上传→重启→健康检查：
+
+```powershell
+# 全部更新
+.\deploy.ps1
+
+# 仅更新前端
+.\deploy.ps1 -FrontendOnly
+
+# 仅更新后端
+.\deploy.ps1 -BackendOnly
+
+# 部署前先备份服务器旧文件
+.\deploy.ps1 -BackupFirst
+
+# 指定其他服务器
+.\deploy.ps1 -Server 1.2.3.4
+```
+
+> 如服务器 IP 固定，可直接修改脚本第 17 行的 `-Server` 默认值。
+
+**等价手动操作**（不使用脚本时）：
 
 ```bash
 # ==== 后端 ====
