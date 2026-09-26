@@ -37,3 +37,11 @@ application.properties
 
 ### Changes.md ###
 Changes.md
+
+target/
+*.class
+*.log
+.env
+application-local.properties
+application-*.properties
+!application.properties

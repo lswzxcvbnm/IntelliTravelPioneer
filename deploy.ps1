@@ -23,6 +23,73 @@ $timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
 $sshUser     = "root"
 
 # -----------------------------------------------------------
+# SSH 连接
+# -----------------------------------------------------------
+$sshCommonArgs = @("-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new")
+
+function Invoke-Ssh {
+    param([string]$Command)
+    ssh @sshCommonArgs "${sshUser}@${Server}" $Command 2>&1
+}
+
+function Invoke-Scp {
+    param([string]$Source, [string]$Dest)
+    scp @sshCommonArgs -r $Source "${sshUser}@${Server}:${Dest}" 2>&1
+}
+
+function Test-SshConnection {
+    Write-Step "检查 SSH 连接 ${sshUser}@${Server}"
+
+    # 先测试密钥是否已配置（免密模式）
+    $testResult = ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${sshUser}@${Server}" "echo SSH-OK" 2>&1
+
+    if ($testResult -match "SSH-OK") {
+        Write-OK "SSH 密钥认证 — 无需密码"
+        return $true
+    }
+
+    # 密钥未配置，引导用户设置
+    Write-Warn "尚未配置 SSH 密钥，每次部署需要反复输入密码"
+    Write-Host ""
+    Write-Host "  ⚡ 建议配置 SSH 密钥免密登录（一劳永逸，只需一次）：" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "     # 第一步：生成密钥（一路回车）"
+    Write-Host "     ssh-keygen -t rsa -b 4096"
+    Write-Host ""
+    Write-Host "     # 第二步：上传公钥到服务器（输入一次服务器密码）"
+    Write-Host "     type `$env:USERPROFILE\.ssh\id_rsa.pub | ssh ${sshUser}@${Server} `"mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys`""
+    Write-Host ""
+    Write-Host "     # 第三步：验证免密登录"
+    Write-Host "     ssh ${sshUser}@${Server} `"echo 免密登录成功`""
+    Write-Host ""
+
+    $choice = Read-Host "  是否现在配置密钥？(y/n)"
+    if ($choice -eq "y" -or $choice -eq "Y") {
+        Write-Host ""
+        Write-Host "  执行 ssh-keygen …" -ForegroundColor Cyan
+        ssh-keygen -t rsa -b 4096
+        Write-Host ""
+        Write-Host "  上传公钥到服务器（需要输入一次服务器密码）…" -ForegroundColor Cyan
+        $pubKeyPath = "$env:USERPROFILE\.ssh\id_rsa.pub"
+        if (Test-Path $pubKeyPath) {
+            Get-Content $pubKeyPath | ssh "${sshUser}@${Server}" "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+            if ($LASTEXITCODE -eq 0) {
+                Write-OK "公钥已上传，测试免密连接…"
+                $verify = ssh -o BatchMode=yes "${sshUser}@${Server}" "echo SSH-OK" 2>&1
+                if ($verify -match "SSH-OK") {
+                    Write-OK "免密登录配置成功！继续部署…"
+                    return $true
+                }
+            }
+        }
+        Write-Err "密钥配置未成功，将使用密码模式继续（每次连接需输密码）"
+    }
+
+    Write-Warn "使用密码模式（每次 ssh/scp 均需输入密码）"
+    return $true
+}
+
+# -----------------------------------------------------------
 # 辅助函数
 # -----------------------------------------------------------
 function Write-Step { Write-Host "`n==== $args ====" -ForegroundColor Cyan }
@@ -53,13 +120,13 @@ function Backup-ServerFiles {
 
     # 备份前端
     $cmd = "if [ -d /var/www/intellitravel/dist ]; then cp -r /var/www/intellitravel/dist /var/www/intellitravel/dist.bak.${timestamp}; echo 'frontend-backed-up'; else echo 'frontend-skipped'; fi"
-    $result = ssh "${sshUser}@${Server}" $cmd 2>&1
+    $result = Invoke-Ssh -Command $cmd
     if ($result -match "frontend-backed-up") { Write-OK "前端已备份到 dist.bak.${timestamp}" }
     elseif ($result -match "frontend-skipped") { Write-Warn "前端目录不存在，跳过" }
 
     # 备份后端 JAR
     $cmd = "if [ -f /opt/intellitravel/intellitravel-pioneer-0.0.1-SNAPSHOT.jar ]; then cp /opt/intellitravel/intellitravel-pioneer-0.0.1-SNAPSHOT.jar /opt/intellitravel/intellitravel-pioneer-0.0.1-SNAPSHOT.jar.bak.${timestamp}; echo 'backend-backed-up'; else echo 'backend-skipped'; fi"
-    $result = ssh "${sshUser}@${Server}" $cmd 2>&1
+    $result = Invoke-Ssh -Command $cmd
     if ($result -match "backend-backed-up") { Write-OK "后端 JAR 已备份" }
     elseif ($result -match "backend-skipped") { Write-Warn "后端 JAR 不存在，跳过" }
 }
@@ -83,11 +150,11 @@ function Deploy-Frontend {
 
     Write-Step "上传前端到服务器"
     Write-Host "  确保目标目录存在..."
-    ssh "${sshUser}@${Server}" "mkdir -p /var/www/intellitravel/dist" 2>&1 | Out-Null
+    Invoke-Ssh -Command "mkdir -p /var/www/intellitravel/dist" | Out-Null
 
     Write-Host "  scp planclient/dist/* → /var/www/intellitravel/dist/ ..."
     $distPath = Join-Path $frontendDir "dist\*"
-    scp -r $distPath "${sshUser}@${Server}:/var/www/intellitravel/dist/" 2>&1
+    Invoke-Scp -Source $distPath -Dest "/var/www/intellitravel/dist/"
     if ($LASTEXITCODE -ne 0) {
         Write-Err "前端上传失败！"
         exit 1
@@ -126,10 +193,10 @@ function Deploy-Backend {
 
     Write-Step "上传后端到服务器"
     Write-Host "  确保目标目录存在..."
-    ssh "${sshUser}@${Server}" "mkdir -p /opt/intellitravel" 2>&1 | Out-Null
+    Invoke-Ssh -Command "mkdir -p /opt/intellitravel" | Out-Null
 
     Write-Host "  scp $($jarFile.Name) → /opt/intellitravel/ ..."
-    scp $jarFile.FullName "${sshUser}@${Server}:/opt/intellitravel/" 2>&1
+    Invoke-Scp -Source $jarFile.FullName -Dest "/opt/intellitravel/"
     if ($LASTEXITCODE -ne 0) {
         Write-Err "后端 JAR 上传失败！"
         exit 1
@@ -137,13 +204,13 @@ function Deploy-Backend {
     Write-OK "后端 JAR 已上传"
 
     Write-Step "重启后端服务"
-    ssh "${sshUser}@${Server}" "sudo systemctl restart intellitravel" 2>&1
+    Invoke-Ssh -Command "sudo systemctl restart intellitravel"
 
     # 等待启动
     Start-Sleep -Seconds 5
 
     # 检查状态
-    $status = ssh "${sshUser}@${Server}" "sudo systemctl is-active intellitravel" 2>&1
+    $status = Invoke-Ssh -Command "sudo systemctl is-active intellitravel"
     if ($status -match "active") {
         Write-OK "后端服务已重启 (active)"
     } else {
@@ -152,7 +219,7 @@ function Deploy-Backend {
 
         # 自动显示最近日志
         Write-Step "最近 30 行日志"
-        ssh "${sshUser}@${Server}" "sudo journalctl -u intellitravel -n 30 --no-pager" 2>&1
+        Invoke-Ssh -Command "sudo journalctl -u intellitravel -n 30 --no-pager"
     }
 }
 
@@ -199,6 +266,9 @@ if ($FrontendOnly) {
     $doBackend  = $true
     Write-Host "模式: 全部部署（前端 + 后端）" -ForegroundColor Yellow
 }
+
+# SSH 连接预检（任何模式都先测试连接）
+Test-SshConnection
 
 # 部署前备份
 if ($BackupFirst) { Backup-ServerFiles }
