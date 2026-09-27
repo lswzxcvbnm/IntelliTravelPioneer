@@ -235,8 +235,8 @@ trip.ai.llm.api-key=${DEEPSEEK_API_KEY:***REMOVED***}
 trip.ai.llm.model=deepseek-v4-flash
 
 # 高德地图配置
-amap.key=${AMAP_KEY:f1964afb46d426d70f8f4dc46cdb73a3}
-trip.ai.amap.mcp-url=https://mcp.amap.com/sse?key=${AMAP_MCP_KEY:bc02d1f93e142eb512f2a9d058d32560}
+amap.key=${AMAP_KEY}
+trip.ai.amap.mcp-url=https://mcp.amap.com/sse?key=${AMAP_MCP_KEY}
 
 # JWT配置
 jwt.secret=IntelliTravel-Pioneer-JWT-Secret-Key-2026
